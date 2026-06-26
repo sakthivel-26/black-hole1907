@@ -1,0 +1,22 @@
+{
+  "name": "Black Hole Music",
+  "short_name": "Black Hole",
+  "description": "Cinematic music streaming with soundtrack-focused discovery",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#ff375f",
+  "icons": [
+    {
+      "src": "/black-hole-logo.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/black-hole-logo.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
