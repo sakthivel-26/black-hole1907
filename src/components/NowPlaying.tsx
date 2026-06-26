@@ -281,13 +281,14 @@ export default function NowPlaying() {
           </div>
 
           {/* Mobile Apple Music-style Layout */}
-          <div className="md:hidden flex flex-col justify-between h-full w-full max-w-md mx-auto px-6 pb-4">
+          <div className="md:hidden flex flex-col justify-between h-full w-full max-w-md mx-auto px-6 pb-10">
             
             {showLyrics ? (
               // Apple Music style Lyrics Mode Header
               <div 
                 className="flex items-center gap-3 w-full border-b border-white/5 pt-3 pb-3 shrink-0"
                 onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
               >
                 <div className="w-12 h-12 rounded-lg overflow-hidden bg-white/5 shrink-0">
                   {imageUrl ? (
@@ -304,6 +305,7 @@ export default function NowPlaying() {
                 </div>
                 <button
                   onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
                   onClick={() => toggleLike(currentSong)}
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/5 border border-white/10 text-white transition hover:bg-white/10 active:scale-95"
                 >
@@ -324,6 +326,9 @@ export default function NowPlaying() {
             <div 
               className="flex-1 flex items-center justify-center py-4 min-h-0 w-full overflow-hidden"
               onPointerDownCapture={(e) => {
+                if (showLyrics) e.stopPropagation();
+              }}
+              onTouchStartCapture={(e) => {
                 if (showLyrics) e.stopPropagation();
               }}
             >
@@ -375,6 +380,7 @@ export default function NowPlaying() {
                 </div>
                 <button
                   onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
                   onClick={() => toggleLike(currentSong)}
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/5 border border-white/10 text-white transition hover:bg-white/10 active:scale-95"
                 >
@@ -394,6 +400,7 @@ export default function NowPlaying() {
                 max={100}
                 value={progress}
                 onPointerDownCapture={(e) => e.stopPropagation()}
+                onTouchStartCapture={(e) => e.stopPropagation()}
                 onChange={(event) => seekTo((Number(event.target.value) / 100) * duration)}
                 className="progress-bar h-1 w-full cursor-pointer accent-white bg-white/20 rounded-full"
                 style={{
@@ -412,6 +419,7 @@ export default function NowPlaying() {
             <div className="mt-6 flex items-center justify-center gap-8 shrink-0">
               <button
                 onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 onClick={prevSong}
                 className="p-3 text-white/95 transition active:scale-90"
                 aria-label="Previous"
@@ -421,6 +429,7 @@ export default function NowPlaying() {
 
               <motion.button
                 onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 whileTap={{ scale: 0.93 }}
                 onClick={togglePlay}
                 className="grid h-16 w-16 place-items-center rounded-full bg-white text-black shadow-[0_10px_30px_rgba(255,255,255,0.25)] active:scale-95 transition"
@@ -437,6 +446,7 @@ export default function NowPlaying() {
 
               <button
                 onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 onClick={nextSong}
                 className="p-3 text-white/95 transition active:scale-90"
                 aria-label="Next"
@@ -449,6 +459,7 @@ export default function NowPlaying() {
             <div className="mt-6 flex items-center justify-between px-4 pb-2 text-white/55 shrink-0">
               <button
                 onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 onClick={() => setShowLyrics(!showLyrics)}
                 className={`p-2 transition active:scale-90 ${showLyrics ? 'text-primary' : 'hover:text-white'}`}
                 aria-label="Lyrics"
@@ -458,6 +469,7 @@ export default function NowPlaying() {
 
               <button
                 onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 onClick={toggleShuffle}
                 className={`p-2 transition active:scale-90 ${shuffle ? 'text-primary' : 'hover:text-white'}`}
                 aria-label="Shuffle"
@@ -467,6 +479,7 @@ export default function NowPlaying() {
 
               <button
                 onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 onClick={toggleRepeat}
                 className={`relative p-2 transition active:scale-90 ${repeat !== 'off' ? 'text-primary' : 'hover:text-white'}`}
                 aria-label="Repeat"
@@ -481,6 +494,7 @@ export default function NowPlaying() {
 
               <button
                 onPointerDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 onClick={() => setShowQueue(true)}
                 className="p-2 transition hover:text-white active:scale-90"
                 aria-label="Queue"
