@@ -282,13 +282,51 @@ export default function NowPlaying() {
 
           {/* Mobile Apple Music-style Layout */}
           <div className="md:hidden flex flex-col justify-between h-full w-full max-w-md mx-auto px-6 pb-4">
-            {/* Top pull-down handle */}
-            <div className="flex flex-col items-center pt-2 pb-4">
-              <div className="w-10 h-1 rounded-full bg-white/20" />
-            </div>
+            
+            {showLyrics ? (
+              // Apple Music style Lyrics Mode Header
+              <div 
+                className="flex items-center gap-3 w-full border-b border-white/5 pt-3 pb-3 shrink-0"
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <div className="w-12 h-12 rounded-lg overflow-hidden bg-white/5 shrink-0">
+                  {imageUrl ? (
+                    <img src={imageUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-white/30">
+                      <FiMusic size={20} />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate text-base font-semibold text-white">{currentSong.name}</h3>
+                  <p className="truncate text-xs text-white/50 mt-0.5">{currentSong.primaryArtists}</p>
+                </div>
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => toggleLike(currentSong)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/5 border border-white/10 text-white transition hover:bg-white/10 active:scale-95"
+                >
+                  <FiHeart
+                    size={18}
+                    className={liked ? 'fill-primary text-primary' : 'text-white/70'}
+                  />
+                </button>
+              </div>
+            ) : (
+              // Top pull-down handle (only shown in artwork mode)
+              <div className="flex flex-col items-center pt-2 pb-2 shrink-0">
+                <div className="w-10 h-1 rounded-full bg-white/20" />
+              </div>
+            )}
 
-            {/* Album artwork or Lyrics */}
-            <div className="flex-1 flex items-center justify-center py-4 min-h-0">
+            {/* Album artwork or Lyrics scroll container */}
+            <div 
+              className="flex-1 flex items-center justify-center py-4 min-h-0 w-full overflow-hidden"
+              onPointerDownCapture={(e) => {
+                if (showLyrics) e.stopPropagation();
+              }}
+            >
               <AnimatePresence mode="wait">
                 {showLyrics ? (
                   <motion.div
@@ -296,7 +334,7 @@ export default function NowPlaying() {
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -15 }}
-                    className="w-full h-full max-h-[42vh] overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-[0_12px_40px_rgba(0,0,0,0.3)] backdrop-blur-md flex flex-col"
+                    className="w-full h-full overflow-hidden flex flex-col"
                   >
                     <LyricsViewer />
                   </motion.div>
@@ -324,29 +362,32 @@ export default function NowPlaying() {
               </AnimatePresence>
             </div>
 
-            {/* Song Title, Artist, & Like Button in one row */}
-            <div className="flex items-center justify-between gap-4 mt-2">
-              <div className="min-w-0 flex-1">
-                <h2 className="truncate text-xl font-bold tracking-tight text-white">
-                  {currentSong.name}
-                </h2>
-                <p className="truncate text-sm text-white/60 mt-0.5">
-                  {currentSong.primaryArtists}
-                </p>
+            {/* Song Title, Artist, & Like Button in one row (Only shown in artwork mode) */}
+            {!showLyrics && (
+              <div className="flex items-center justify-between gap-4 mt-2 shrink-0">
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-xl font-bold tracking-tight text-white">
+                    {currentSong.name}
+                  </h2>
+                  <p className="truncate text-sm text-white/60 mt-0.5">
+                    {currentSong.primaryArtists}
+                  </p>
+                </div>
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => toggleLike(currentSong)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/5 border border-white/10 text-white transition hover:bg-white/10 active:scale-95"
+                >
+                  <FiHeart
+                    size={18}
+                    className={liked ? 'fill-primary text-primary' : 'text-white/70'}
+                  />
+                </button>
               </div>
-              <button
-                onClick={() => toggleLike(currentSong)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/5 border border-white/10 text-white transition hover:bg-white/10 active:scale-95"
-              >
-                <FiHeart
-                  size={18}
-                  className={liked ? 'fill-primary text-primary' : 'text-white/70'}
-                />
-              </button>
-            </div>
+            )}
 
             {/* Progress bar */}
-            <div className="mt-6">
+            <div className="mt-6 shrink-0">
               <input
                 type="range"
                 min={0}
@@ -368,8 +409,9 @@ export default function NowPlaying() {
             </div>
 
             {/* Main Playback Controls */}
-            <div className="mt-6 flex items-center justify-center gap-8">
+            <div className="mt-6 flex items-center justify-center gap-8 shrink-0">
               <button
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={prevSong}
                 className="p-3 text-white/95 transition active:scale-90"
                 aria-label="Previous"
@@ -378,6 +420,7 @@ export default function NowPlaying() {
               </button>
 
               <motion.button
+                onPointerDown={(e) => e.stopPropagation()}
                 whileTap={{ scale: 0.93 }}
                 onClick={togglePlay}
                 className="grid h-16 w-16 place-items-center rounded-full bg-white text-black shadow-[0_10px_30px_rgba(255,255,255,0.25)] active:scale-95 transition"
@@ -393,6 +436,7 @@ export default function NowPlaying() {
               </motion.button>
 
               <button
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={nextSong}
                 className="p-3 text-white/95 transition active:scale-90"
                 aria-label="Next"
@@ -402,8 +446,9 @@ export default function NowPlaying() {
             </div>
 
             {/* Bottom Actions Row */}
-            <div className="mt-6 flex items-center justify-between px-4 pb-2 text-white/55">
+            <div className="mt-6 flex items-center justify-between px-4 pb-2 text-white/55 shrink-0">
               <button
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => setShowLyrics(!showLyrics)}
                 className={`p-2 transition active:scale-90 ${showLyrics ? 'text-primary' : 'hover:text-white'}`}
                 aria-label="Lyrics"
@@ -412,6 +457,7 @@ export default function NowPlaying() {
               </button>
 
               <button
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={toggleShuffle}
                 className={`p-2 transition active:scale-90 ${shuffle ? 'text-primary' : 'hover:text-white'}`}
                 aria-label="Shuffle"
@@ -420,6 +466,7 @@ export default function NowPlaying() {
               </button>
 
               <button
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={toggleRepeat}
                 className={`relative p-2 transition active:scale-90 ${repeat !== 'off' ? 'text-primary' : 'hover:text-white'}`}
                 aria-label="Repeat"
@@ -433,6 +480,7 @@ export default function NowPlaying() {
               </button>
 
               <button
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => setShowQueue(true)}
                 className="p-2 transition hover:text-white active:scale-90"
                 aria-label="Queue"

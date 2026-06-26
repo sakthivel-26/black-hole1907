@@ -1,12 +1,13 @@
 import { usePlayerStore } from '../store/usePlayerStore';
 import { getImageUrl, formatDuration } from '../services/api';
 import { motion } from 'framer-motion';
-import { FiX, FiTrash2, FiPlay } from 'react-icons/fi';
+import { FiX, FiTrash2, FiPlay, FiHeart } from 'react-icons/fi';
 
 export default function QueuePanel() {
   const {
     queue, queueIndex, currentSong, showQueue,
     playFromQueue, removeFromQueue, clearQueue, setShowQueue,
+    toggleLike, isLiked,
   } = usePlayerStore();
 
   if (!showQueue) return null;
@@ -91,12 +92,22 @@ export default function QueuePanel() {
                   <span className="text-xs text-white/20 tabular-nums">
                     {song.duration > 0 ? formatDuration(song.duration) : ''}
                   </span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); removeFromQueue(queueIndex + 1 + i); }}
-                    className="p-1 text-white/20 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
-                  >
-                    <FiX size={14} />
-                  </button>
+                  <div className="flex items-center gap-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleLike(song); }}
+                      className={`p-1.5 rounded-full hover:bg-white/10 transition-colors ${isLiked(song.id) ? 'text-primary' : 'text-white/40'}`}
+                      title="Add to favorites"
+                    >
+                      <FiHeart className={isLiked(song.id) ? 'fill-current' : ''} size={14} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeFromQueue(queueIndex + 1 + i); }}
+                      className="p-1.5 rounded-full hover:bg-white/10 text-white/40 hover:text-red-400 transition-colors"
+                      title="Remove from queue"
+                    >
+                      <FiX size={14} />
+                    </button>
+                  </div>
                 </motion.div>
               ))}
             </div>
