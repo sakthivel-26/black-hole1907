@@ -62,6 +62,7 @@ export default function NowPlaying() {
   const liked = isLiked(currentSong.id);
   const downloaded = isDownloaded(currentSong.id);
   const imageUrl = getImageUrl(currentSong.image, 'high');
+  const backgroundImageUrl = getImageUrl(currentSong.image, 'low');
   const isInternationalTrack = (currentSong.language || '').toLowerCase().includes('english');
 
   const handleDownload = async () => {
@@ -89,15 +90,15 @@ export default function NowPlaying() {
           setShowNowPlaying(false);
         }
       }}
-      className="fixed inset-0 z-100"
+      className="fixed inset-0 z-[100]"
     >
       <div className="absolute inset-0 overflow-hidden">
-        {imageUrl && (
+        {backgroundImageUrl && (
           <img
-            src={imageUrl}
+            src={backgroundImageUrl}
             alt=""
             className="h-full w-full object-cover scale-110"
-            style={{ filter: 'blur(90px) brightness(0.38) saturate(1.1)' }}
+            style={{ filter: 'blur(45px) brightness(0.38) saturate(1.1)' }}
           />
         )}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.16),transparent_28%),linear-gradient(180deg,rgba(0,0,0,0.18),rgba(0,0,0,0.52)_52%,rgba(0,0,0,0.76)_100%)]" />

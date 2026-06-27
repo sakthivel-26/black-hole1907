@@ -9,7 +9,7 @@ interface Props {
 }
 
 export default function SongCard({ song, onPlay }: Props) {
-  const imageUrl = getImageUrl(song.image, 'high');
+  const imageUrl = getImageUrl(song.image, 'medium');
 
   return (
     <motion.div

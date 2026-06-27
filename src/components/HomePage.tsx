@@ -244,7 +244,7 @@ export default function HomePage() {
                 eyebrow="Recent"
                 title={song.name}
                 subtitle={song.primaryArtists}
-                imageUrl={getImageUrl(song.image, 'high')}
+                imageUrl={getImageUrl(song.image, 'medium')}
                 onClick={() => playSong(song, recentlyPlayed)}
               />
             ))}
@@ -272,7 +272,7 @@ export default function HomePage() {
                     eyebrow={index === 0 ? section.curator : sectionIndex % 2 === 0 ? 'Apple-style Mix' : 'Featured'}
                     title={song.album?.name || song.name}
                     subtitle={song.primaryArtists}
-                    imageUrl={getImageUrl(song.image, 'high')}
+                    imageUrl={getImageUrl(song.image, 'medium')}
                     onClick={() => playSong(song, section.songs)}
                   />
                 ))}

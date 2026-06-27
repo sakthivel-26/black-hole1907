@@ -518,9 +518,9 @@ export default function SearchPage() {
                         }}
                       >
                         <div className="aspect-square overflow-hidden rounded-3xl bg-white/5">
-                          {getImageUrl(album.image, 'high') ? (
+                          {getImageUrl(album.image, 'medium') ? (
                             <img
-                              src={getImageUrl(album.image, 'high')}
+                              src={getImageUrl(album.image, 'medium')}
                               alt={album.name}
                               className="h-full w-full object-cover transition duration-300 hover:scale-[1.03]"
                               loading="lazy"
