@@ -1,0 +1,10 @@
+{
+  "version": "1.0.1",
+  "apkUrl": "https://github.com/sakthivel-26/black-hole-26/releases",
+  "changelog": [
+    "Apple Music style side-by-side scrolling lyrics",
+    "Optimized background blur & image loading speeds",
+    "Fixed Global (YT) search CORS block on Android",
+    "Double-press back button to exit confirmation"
+  ]
+}

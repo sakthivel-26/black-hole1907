@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { Toaster, toast } from 'react-hot-toast';
 import { AnimatePresence } from 'framer-motion';
 import { usePlayerStore } from './store/usePlayerStore';
@@ -10,6 +10,7 @@ import PlayerBar from './components/PlayerBar';
 import AudioEngine from './components/AudioEngine';
 import NowPlaying from './components/NowPlaying';
 import QueuePanel from './components/QueuePanel';
+import UpdateModal from './components/UpdateModal';
 
 // Lazy load views for better performance
 const HomePage = lazy(() => import('./components/HomePage'));
@@ -19,11 +20,42 @@ const DownloadsPage = lazy(() => import('./components/DownloadsPage'));
 const AlbumView = lazy(() => import('./components/AlbumView'));
 const ArtistView = lazy(() => import('./components/ArtistView'));
 
+const APP_VERSION = '1.0.0';
+
 function App() {
   const { currentView, dominantColor } = usePlayerStore();
+  const [showUpdate, setShowUpdate] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string; changelog: string[]; apkUrl: string } | null>(null);
 
   useEffect(() => {
     void usePlayerStore.getState().hydrateCloudData();
+  }, []);
+
+  useEffect(() => {
+    const checkForUpdates = async () => {
+      try {
+        const fetchUrl = Capacitor.isNativePlatform()
+          ? 'https://black-hole26.vercel.app/version.json'
+          : '/version.json';
+
+        const res = await fetch(fetchUrl);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.version && data.version !== APP_VERSION) {
+            setUpdateInfo({
+              latestVersion: data.version,
+              changelog: data.changelog || [],
+              apkUrl: data.apkUrl || 'https://github.com/sakthivel-26/black-hole-26/releases',
+            });
+            setShowUpdate(true);
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to check for updates:', e);
+      }
+    };
+
+    void checkForUpdates();
   }, []);
 
   useEffect(() => {
@@ -139,6 +171,18 @@ function App() {
           }
         }}
       />
+
+      <AnimatePresence>
+        {showUpdate && updateInfo && (
+          <UpdateModal
+            latestVersion={updateInfo.latestVersion}
+            currentVersion={APP_VERSION}
+            changelog={updateInfo.changelog}
+            apkUrl={updateInfo.apkUrl}
+            onClose={() => setShowUpdate(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
