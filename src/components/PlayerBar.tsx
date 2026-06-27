@@ -76,7 +76,7 @@ export default function PlayerBar() {
 
   if (isPlayerBarMinimized) {
     return (
-      <div className="fixed bottom-3 right-3 z-50 flex items-center gap-3 md:bottom-5 md:right-5">
+      <div className="fixed bottom-[calc(68px+env(safe-area-inset-bottom,0px))] right-3 z-50 flex items-center gap-3 md:bottom-5 md:right-5">
         <button
           onClick={togglePlay}
           className="flex h-13 w-13 items-center justify-center rounded-full border border-white/10 bg-[#232326]/92 text-white shadow-[0_20px_40px_rgba(0,0,0,0.34)] backdrop-blur-3xl transition hover:scale-[1.03]"
@@ -115,7 +115,7 @@ export default function PlayerBar() {
   }
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
+    <div className="fixed bottom-[calc(53px+env(safe-area-inset-bottom,0px))] md:bottom-0 left-0 right-0 z-50 pointer-events-none">
       <div className="mx-auto w-full max-w-[1180px] px-2 pb-2 md:px-4 md:pb-4">
         <div className="pointer-events-auto overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(135deg,rgba(62,62,65,0.88),rgba(28,28,30,0.94))] shadow-[0_20px_60px_rgba(0,0,0,0.32)] backdrop-blur-3xl">
           <div className="px-4 pt-2 md:px-6">

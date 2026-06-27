@@ -1,17 +1,8 @@
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import type { Song } from '../types';
 
-// Safe Capacitor detection — avoids crashes on web
-let _capacitorHttp: any = null;
-let _isNative = false;
-try {
-  const cap = (globalThis as any).Capacitor;
-  if (cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform()) {
-    _isNative = true;
-    import('@capacitor/core').then(mod => {
-      _capacitorHttp = mod.CapacitorHttp;
-    }).catch(() => {});
-  }
-} catch {}
+const _isNative = Capacitor.isNativePlatform();
+const _capacitorHttp = CapacitorHttp;
 
 function parseDuration(durationStr: string): number {
   if (!durationStr) return 0;

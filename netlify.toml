@@ -3,6 +3,12 @@
   publish = "dist"
 
 [[redirects]]
+  from = "/yt-search"
+  to = "https://www.youtube.com/results"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

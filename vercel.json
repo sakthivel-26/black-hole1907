@@ -1,4 +1,10 @@
 {
   "buildCommand": "npm run vercel-build",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/yt-search",
+      "destination": "https://www.youtube.com/results"
+    }
+  ]
 }
