@@ -2,31 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FiMusic, FiLoader } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { usePlayerStore } from '../store/usePlayerStore';
-import { getSongLyrics } from '../services/api';
-
-interface SyncedLine {
-  time: number;
-  text: string;
-}
-
-function parseLRC(lrc: string): SyncedLine[] {
-  const lines = lrc.split('\n');
-  const result: SyncedLine[] = [];
-  const timeRegex = /\[(\d+):(\d+(?:\.\d+)?)\]/;
-
-  for (const line of lines) {
-    const match = timeRegex.exec(line);
-    if (match) {
-      const minutes = parseInt(match[1], 10);
-      const seconds = parseFloat(match[2]);
-      const time = minutes * 60 + seconds;
-      const text = line.replace(timeRegex, '').trim();
-      result.push({ time, text });
-    }
-  }
-
-  return result.sort((a, b) => a.time - b.time);
-}
+import { getLyrics, type SyncedLine } from '../services/lyricsService';
 
 export default function LyricsViewer() {
   const { currentSong, currentTime, duration, seekTo } = usePlayerStore();
@@ -51,88 +27,22 @@ export default function LyricsViewer() {
     let active = true;
     setLyricsState({ text: '', lines: [], isSynced: false, loading: true });
 
-    const fetchLyrics = async () => {
-      // 1. Try LrcLib Search (highly robust for fuzzy matching and regional songs)
-      try {
-        const cleanArtist = currentSong.primaryArtists.split(',')[0].split('&')[0].trim();
-        const cleanTitle = currentSong.name
-          .replace(/\s*[\(\[][^)]*Version[^)]*[\)\]]/gi, '')
-          .replace(/\s*[\(\[][^)]*From[^)]*[\)\]]/gi, '')
-          .replace(/\s*[\(\[][^)]*Soundtrack[^)]*[\)\]]/gi, '')
-          .replace(/\s*[\(\[][^)]*OST[^)]*[\)\]]/gi, '')
-          .trim();
-
-        let results = [];
-        const searchQuery = `${cleanTitle} ${cleanArtist}`;
-        const searchResponse = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(searchQuery)}`);
-        if (searchResponse.ok) {
-          results = await searchResponse.json();
-        }
-
-        // Fallback: if no results, search with just the track title to handle artist mismatches
-        if ((!results || results.length === 0) && active) {
-          const fallbackResponse = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(cleanTitle)}`);
-          if (fallbackResponse.ok) {
-            results = await fallbackResponse.json();
-          }
-        }
-
-        if (Array.isArray(results) && results.length > 0 && active) {
-          // Prioritize matches that have synced lyrics first
-          let match = results.find((r: any) => r.syncedLyrics && r.syncedLyrics.trim().length > 0);
-          if (!match) {
-            // Otherwise, fallback to matches that have plain lyrics
-            match = results.find((r: any) => r.plainLyrics && r.plainLyrics.trim().length > 0);
-          }
-
-          if (match) {
-            if (match.syncedLyrics) {
-              const parsed = parseLRC(match.syncedLyrics);
-              if (parsed.length > 0) {
-                setLyricsState({
-                  text: match.syncedLyrics,
-                  isSynced: true,
-                  lines: parsed,
-                  loading: false,
-                });
-                return;
-              }
-            }
-            if (match.plainLyrics) {
-              setLyricsState({
-                text: match.plainLyrics,
-                isSynced: false,
-                lines: [],
-                loading: false,
-              });
-              return;
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('LrcLib search failed, checking Saavn fallback:', err);
-      }
-
-      // 2. Fallback to Saavn
-      try {
-        const saavnData = await getSongLyrics(currentSong.id);
+    getLyrics(currentSong, duration)
+      .then((data) => {
         if (active) {
           setLyricsState({
-            text: saavnData.lyrics || '',
-            isSynced: false,
-            lines: [],
+            text: data.text,
+            isSynced: data.isSynced,
+            lines: data.lines,
             loading: false,
           });
         }
-      } catch (err) {
-        console.error('Saavn fallback failed:', err);
+      })
+      .catch(() => {
         if (active) {
           setLyricsState({ text: '', isSynced: false, lines: [], loading: false });
         }
-      }
-    };
-
-    void fetchLyrics();
+      });
 
     return () => {
       active = false;

@@ -4,17 +4,26 @@ import { searchYouTubeSongs } from '../services/youtube';
 import toast from 'react-hot-toast';
 import { usePlayerStore } from '../store/usePlayerStore';
 import type { Song } from '../types';
+import { prefetchLyrics } from '../services/lyricsService';
 
 function updateMediaSessionCustom(song: Song | null, currentTime: number, duration: number, isPlaying: boolean) {
   if (!song || !('mediaSession' in navigator)) return;
 
+  const state = usePlayerStore.getState();
+  const repeatMode = state.repeat;
+  const isShuffle = state.shuffle;
+
+  const repeatText = repeatMode === 'one' ? ' (🔁 Repeat One)' : repeatMode === 'all' ? ' (🔁 Repeat All)' : '';
+  const shuffleText = isShuffle ? ' (🔀 Shuffle On)' : '';
+  const metadataArtist = `${song.primaryArtists}${repeatText}${shuffleText}`;
+
   navigator.mediaSession.metadata = new MediaMetadata({
     title: song.name,
-    artist: song.primaryArtists,
+    artist: metadataArtist,
     album: song.album?.name || '',
     artwork: song.image?.map((image) => ({
       src: image.url,
-      sizes: image.quality,
+      sizes: image.quality?.includes('x') ? image.quality : '500x500',
       type: 'image/jpeg',
     })) || [],
   });
@@ -55,6 +64,7 @@ export default function AudioEngine() {
     isMuted,
     currentTime,
     repeat,
+    shuffle,
     setIsPlaying,
     setIsLoading,
     setDuration,
@@ -494,6 +504,9 @@ export default function AudioEngine() {
     };
 
     void loadAndPlaySong();
+    if (currentSong) {
+      prefetchLyrics(currentSong);
+    }
   }, [currentSong?.id]);
 
   useEffect(() => {
@@ -557,6 +570,20 @@ export default function AudioEngine() {
       }
     }
   }, [currentTime, currentSong?.id]);
+
+  useEffect(() => {
+    if (currentSong) {
+      const audio = audioRef.current;
+      const isYt = currentSong.id.startsWith('yt_');
+      let songDuration = 0;
+      try {
+        songDuration = isYt 
+          ? (ytPlayerRef.current?.getDuration() || currentSong.duration || 0)
+          : (audio?.duration || currentSong.duration || 0);
+      } catch {}
+      updateMediaSessionCustom(currentSong, currentTime, songDuration, isPlaying);
+    }
+  }, [repeat, shuffle]);
 
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
