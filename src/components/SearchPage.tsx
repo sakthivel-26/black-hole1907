@@ -458,7 +458,7 @@ export default function SearchPage() {
                         index={index + 1}
                         onPlay={() => {
                           addToRecentSearches(query);
-                          playSong(song, songs);
+                          playSong(song, [song]);
                         }}
                       />
                     ))}
@@ -492,7 +492,7 @@ export default function SearchPage() {
                         index={index + 1}
                         onPlay={() => {
                           addToRecentSearches(query);
-                          playSong(song, youtubeSongs);
+                          playSong(song, [song]);
                         }}
                       />
                     ))}

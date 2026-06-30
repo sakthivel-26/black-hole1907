@@ -20,7 +20,7 @@ const DownloadsPage = lazy(() => import('./components/DownloadsPage'));
 const AlbumView = lazy(() => import('./components/AlbumView'));
 const ArtistView = lazy(() => import('./components/ArtistView'));
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 
 function App() {
   const { currentView, dominantColor } = usePlayerStore();
@@ -42,7 +42,7 @@ function App() {
     const checkForUpdates = async () => {
       try {
         const fetchUrl = Capacitor.isNativePlatform()
-          ? 'https://black-hole26.vercel.app/version.json'
+          ? 'https://black-hole-2607.vercel.app/version.json'
           : '/version.json';
 
         const res = await fetch(fetchUrl);

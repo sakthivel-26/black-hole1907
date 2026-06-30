@@ -227,3 +227,16 @@ export async function searchYouTubeSongs(
 export async function getYouTubeStreamUrl(videoId: string): Promise<string> {
   return `https://www.youtube.com/watch?v=${videoId}`;
 }
+
+export async function getYTSongSuggestions(song: Song): Promise<Song[]> {
+  try {
+    const cleanArtist = song.primaryArtists.replace(/\s*-\s*topic/gi, '').trim();
+    // Search for the artist + mix or similar tracks to get same vibe
+    const query = `${song.name} ${cleanArtist} radio`;
+    const results = await searchYouTubeSongs(query, song.name, cleanArtist);
+    return results.filter(s => s.id !== song.id);
+  } catch (e) {
+    console.error('Failed to get YouTube suggestions:', e);
+    return [];
+  }
+}

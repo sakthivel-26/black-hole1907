@@ -24,11 +24,22 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onPause() {
-        super.onPause();
-        // Keep WebView JS engine running in background to prevent audio suspension
+    public void onResume() {
+        super.onResume();
         if (this.getBridge() != null && this.getBridge().getWebView() != null) {
             this.getBridge().getWebView().onResume();
+            this.getBridge().getWebView().resumeTimers();
+        }
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause(); 
+        
+        // Force the WebView to stay active in the background to prevent audio pause
+        if (this.getBridge() != null && this.getBridge().getWebView() != null) {
+            this.getBridge().getWebView().onResume();
+            this.getBridge().getWebView().resumeTimers();
         }
     }
 }

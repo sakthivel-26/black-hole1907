@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Song, QueueItem, RepeatMode, ViewMode, UserPlaylist } from '../types';
 import { getSongSuggestions } from '../services/api';
+import { getYTSongSuggestions } from '../services/youtube';
 
 type RecentSongRow = {
   id: string;
@@ -166,11 +167,43 @@ const songFromRecentRow = (row: RecentSongRow): Song => ({
   url: '',
 });
 
+const getCoreTitle = (title: string): string => {
+  return (title || '')
+    .toLowerCase()
+    .replace(/\(from ".*?"\)/gi, '')
+    .replace(/\[from ".*?"\]/gi, '')
+    .replace(/\(.*? (remix|mix|edit|cover|lofi|flip|version|reprise|tribute|slowed|reverb)\)/gi, '')
+    .replace(/\[.*? (remix|mix|edit|cover|lofi|flip|version|reprise|tribute|slowed|reverb)\]/gi, '')
+    .replace(/\(original.*?\)/gi, '')
+    .replace(/ - (single|ep|remix|mix|edit|cover|lofi|flip|version|reprise|tribute)$/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+};
+
 const dedupeQueueItems = (items: QueueItem[]): QueueItem[] => {
-  const seen = new Set<string>();
+  const seenIds = new Set<string>();
+  const seenCoreTitles = new Set<string>();
+  const seenArtistKeys = new Set<string>();
+
   return items.filter((item) => {
-    if (seen.has(item.id)) return false;
-    seen.add(item.id);
+    if (!item.id || seenIds.has(item.id)) return false;
+    seenIds.add(item.id);
+
+    const coreTitle = getCoreTitle(item.name);
+    const primaryArtist = (item.primaryArtists || '').split(',')[0].toLowerCase().trim();
+    const artistKey = `${coreTitle}|${primaryArtist}`;
+
+    // Aggressive deduplication:
+    // 1. If we've seen this exact song/artist combo, skip.
+    if (seenArtistKeys.has(artistKey)) return false;
+
+    // 2. If we've seen this core title recently (preventing 5 different covers of one song in a row), skip.
+    // We allow the same title if it's far apart in the queue, but for "Up Next", we want variety.
+    if (seenCoreTitles.has(coreTitle)) return false;
+
+    seenCoreTitles.add(coreTitle);
+    seenArtistKeys.add(artistKey);
+
     return true;
   });
 };
@@ -310,6 +343,22 @@ const isTamilSong = (item: Song | QueueItem): boolean => {
   return sLang.includes('tamil') || isTamilArtist(item);
 };
 
+const fetchVibeSuggestions = async (song: Song): Promise<Song[]> => {
+  try {
+    let suggestions: Song[] = [];
+    if (!song.id.startsWith('yt_')) {
+      suggestions = await getSongSuggestions(song.id);
+    }
+    if (suggestions.length === 0) {
+      suggestions = await getYTSongSuggestions(song);
+    }
+    return suggestions;
+  } catch (e) {
+    console.error('Failed to fetch vibe suggestions:', e);
+    return [];
+  }
+};
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   currentSong: null,
   isPlaying: false,
@@ -415,11 +464,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     get().addToRecentlyPlayed(song);
 
     // Auto-load suggestions for queue (prioritize matching language/vibe)
+    // If playing from search, we prefer radio-mode (suggestions) over search-list
     const currentView = state.currentView;
-    const shouldFetchSuggestions = currentView === 'search' || newQueue.length <= 3;
+    const isFromSearch = currentView === 'search';
+    const shouldFetchSuggestions = isFromSearch || newQueue.length <= 5;
 
     if (shouldFetchSuggestions) {
-      getSongSuggestions(song.id).then(suggestions => {
+      fetchVibeSuggestions(song).then(suggestions => {
         if (suggestions.length > 0) {
           const stateNow = get();
           const currentQueue = stateNow.queue;
@@ -427,8 +478,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           if (curIndex === -1) return;
 
           const existingIds = new Set(currentQueue.map(q => q.id));
+          const existingCoreKeys = new Set(currentQueue.map(q => `${getCoreTitle(q.name)}|${(q.primaryArtists || '').split(',')[0].toLowerCase().trim()}`));
+
           const newSuggestions = suggestions
-            .filter(s => !existingIds.has(s.id))
+            .filter(s => {
+              const idExists = existingIds.has(s.id);
+              const key = `${getCoreTitle(s.name)}|${(s.primaryArtists || '').split(',')[0].toLowerCase().trim()}`;
+              const coreExists = existingCoreKeys.has(key);
+              return !idExists && !coreExists;
+            })
             .map(toQueueItem);
             
           if (newSuggestions.length > 0) {
@@ -445,7 +503,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
             const prioritized = [...sameLanguage, ...otherLanguages];
             
             const played = currentQueue.slice(0, curIndex + 1);
-            const remaining = currentQueue.slice(curIndex + 1);
+            const remaining = isFromSearch ? [] : currentQueue.slice(curIndex + 1); // Clear search list if from search to prioritize "vibe"
             
             set({ queue: dedupeQueueItems([...played, ...prioritized, ...remaining]) });
           }
@@ -476,12 +534,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       if (currentSong) {
         set({ isLoading: true });
         try {
-          const suggestions = await getSongSuggestions(currentSong.id);
+          const suggestions = await fetchVibeSuggestions(currentSong);
           if (suggestions.length > 0) {
             const currentQueue = get().queue;
             const existingIds = new Set(currentQueue.map(q => q.id));
+            const existingCoreKeys = new Set(currentQueue.map(q => `${getCoreTitle(q.name)}|${(q.primaryArtists || '').split(',')[0].toLowerCase().trim()}`));
+
             const newSuggestions = suggestions
-              .filter(s => !existingIds.has(s.id))
+              .filter(s => {
+                const idExists = existingIds.has(s.id);
+                const key = `${getCoreTitle(s.name)}|${(s.primaryArtists || '').split(',')[0].toLowerCase().trim()}`;
+                const coreExists = existingCoreKeys.has(key);
+                return !idExists && !coreExists;
+              })
               .map(toQueueItem);
               
             if (newSuggestions.length > 0) {
