@@ -172,40 +172,79 @@ const getCoreTitle = (title: string): string => {
     .toLowerCase()
     .replace(/\(from ".*?"\)/gi, '')
     .replace(/\[from ".*?"\]/gi, '')
-    .replace(/\(.*? (remix|mix|edit|cover|lofi|flip|version|reprise|tribute|slowed|reverb)\)/gi, '')
-    .replace(/\[.*? (remix|mix|edit|cover|lofi|flip|version|reprise|tribute|slowed|reverb)\]/gi, '')
+    .replace(/\(.*? (remix|mix|edit|cover|lofi|flip|version|reprise|tribute|slowed|reverb|instrumental|karaoke|bgm|violin|flute|piano|lyric|lyrics|video|audio)\)/gi, '')
+    .replace(/\[.*? (remix|mix|edit|cover|lofi|flip|version|reprise|tribute|slowed|reverb|instrumental|karaoke|bgm|violin|flute|piano|lyric|lyrics|video|audio)\]/gi, '')
     .replace(/\(original.*?\)/gi, '')
-    .replace(/ - (single|ep|remix|mix|edit|cover|lofi|flip|version|reprise|tribute)$/gi, '')
+    .replace(/ - (single|ep|remix|mix|edit|cover|lofi|flip|version|reprise|tribute|instrumental|karaoke|bgm|lyric|lyrics|video|audio)$/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 };
 
+const isDuplicateTrack = (songA: Song, songB: Song): boolean => {
+  if (songA.id === songB.id) return true;
+
+  const cleanA = songA.name.toLowerCase();
+  const cleanB = songB.name.toLowerCase();
+
+  const normalizePhonetic = (str: string): string => {
+    return str.toLowerCase()
+      .replace(/[^a-z0-9]/gi, '')
+      .replace(/([a-z])\1+/g, '$1')
+      .replace(/ae/g, 'e')
+      .replace(/ai/g, 'e')
+      .replace(/y/g, 'i')
+      .replace(/oo/g, 'u')
+      .replace(/aa/g, 'a')
+      .replace(/h/g, '');
+  };
+
+  const phoneA = normalizePhonetic(cleanA);
+  const phoneB = normalizePhonetic(cleanB);
+
+  if (phoneA && phoneB) {
+    if (phoneA.includes(phoneB) || phoneB.includes(phoneA)) {
+      return true;
+    }
+  }
+
+  const phoneCoreA = normalizePhonetic(getCoreTitle(songA.name));
+  const phoneCoreB = normalizePhonetic(getCoreTitle(songB.name));
+
+  if (phoneCoreA && phoneCoreB) {
+    if (phoneCoreA.includes(phoneCoreB) || phoneCoreB.includes(phoneCoreA)) {
+      return true;
+    }
+  }
+
+  // Duration + Artist overlap check (highly robust for foreign/Tamil titles)
+  const durationDiff = Math.abs((songA.duration || 0) - (songB.duration || 0));
+  if (durationDiff < 15) {
+    const artistA = (songA.primaryArtists || '').toLowerCase().split(',')[0].split('&')[0].trim();
+    const artistB = (songB.primaryArtists || '').toLowerCase().split(',')[0].split('&')[0].trim();
+    if (artistA && artistB && (artistA.includes(artistB) || artistB.includes(artistA))) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 const dedupeQueueItems = (items: QueueItem[]): QueueItem[] => {
   const seenIds = new Set<string>();
-  const seenCoreTitles = new Set<string>();
-  const seenArtistKeys = new Set<string>();
+  const deduped: QueueItem[] = [];
 
-  return items.filter((item) => {
-    if (!item.id || seenIds.has(item.id)) return false;
+  for (const item of items) {
+    if (!item.id || seenIds.has(item.id)) continue;
+
+    // Check if this item is a duplicate of any item already accepted in the queue
+    const isDup = deduped.some(acceptedItem => isDuplicateTrack(acceptedItem, item));
+    if (isDup) continue;
+
     seenIds.add(item.id);
+    deduped.push(item);
+  }
 
-    const coreTitle = getCoreTitle(item.name);
-    const primaryArtist = (item.primaryArtists || '').split(',')[0].toLowerCase().trim();
-    const artistKey = `${coreTitle}|${primaryArtist}`;
-
-    // Aggressive deduplication:
-    // 1. If we've seen this exact song/artist combo, skip.
-    if (seenArtistKeys.has(artistKey)) return false;
-
-    // 2. If we've seen this core title recently (preventing 5 different covers of one song in a row), skip.
-    // We allow the same title if it's far apart in the queue, but for "Up Next", we want variety.
-    if (seenCoreTitles.has(coreTitle)) return false;
-
-    seenCoreTitles.add(coreTitle);
-    seenArtistKeys.add(artistKey);
-
-    return true;
-  });
+  return deduped;
 };
 
 const playlistSongFromRow = (row: PlaylistSongRow): Song => ({
