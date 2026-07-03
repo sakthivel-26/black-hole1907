@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import {
   FiCheck,
   FiChevronDown,
+  FiClock,
   FiDownload,
   FiHeart,
   FiMessageCircle,
@@ -27,6 +28,7 @@ import { usePlayerStore } from '../store/usePlayerStore';
 import LyricsViewer from './LyricsViewer';
 
 export default function NowPlaying() {
+  const [showTimerMenu, setShowTimerMenu] = useState(false);
   const {
     currentSong,
     isPlaying,
@@ -38,6 +40,8 @@ export default function NowPlaying() {
     isLoading,
     showNowPlaying,
     showLyrics,
+    sleepTimer,
+    sleepTimerRemaining,
     togglePlay,
     nextSong,
     prevSong,
@@ -52,11 +56,17 @@ export default function NowPlaying() {
     setShowQueue,
     addDownloadedSong,
     isDownloaded,
+    setSleepTimer,
   } = usePlayerStore();
 
-
-
   if (!currentSong || !showNowPlaying) return null;
+
+  const formatTimer = (seconds: number | null): string => {
+    if (seconds === null) return '';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const liked = isLiked(currentSong.id);
@@ -612,6 +622,58 @@ export default function NowPlaying() {
                   </span>
                 )}
               </button>
+
+              {/* Sleep Timer */}
+              <div className="relative">
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onClick={() => setShowTimerMenu(!showTimerMenu)}
+                  className={`relative p-2 transition active:scale-90 ${sleepTimerRemaining ? 'text-primary' : 'hover:text-white'}`}
+                  aria-label="Sleep Timer"
+                >
+                  <FiClock size={20} />
+                  {sleepTimerRemaining && (
+                    <span className="absolute -right-2 -top-1.5 rounded-full bg-[#ff375f] px-1 py-0.5 text-[8px] font-bold text-white leading-none scale-90">
+                      {formatTimer(sleepTimerRemaining)}
+                    </span>
+                  )}
+                </button>
+
+                {showTimerMenu && (
+                  <div 
+                    className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 w-32 rounded-2xl border border-white/10 bg-[#28282b]/95 p-1 shadow-[0_20px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/35 text-center">Sleep Timer</div>
+                    <div className="h-px bg-white/8 my-1" />
+                    {[
+                      { label: 'Off', value: null },
+                      { label: '15 Mins', value: 15 },
+                      { label: '30 Mins', value: 30 },
+                      { label: '45 Mins', value: 45 },
+                      { label: '1 Hour', value: 60 },
+                    ].map((opt) => (
+                      <button
+                        key={opt.label}
+                        onClick={() => {
+                          setSleepTimer(opt.value);
+                          setShowTimerMenu(false);
+                        }}
+                        className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs font-medium transition ${
+                          (opt.value === sleepTimer)
+                            ? 'bg-[#ff375f] text-white'
+                            : 'text-white/70 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        <span>{opt.label}</span>
+                        {opt.value === sleepTimer && <FiCheck size={12} />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <button
                 onPointerDown={(e) => e.stopPropagation()}

@@ -42,19 +42,19 @@ const FEATURED_SHELVES: ShelfConfig[] = [
     title: "Everyone's Listening To...",
     subtitle: 'Fresh picks with huge replay value.',
     curator: 'Black Hole Tamil',
-    query: `trending tamil songs ${CURRENT_MONTH} ${CURRENT_YEAR}`,
+    query: 'latest tamil chartbusters',
   },
   {
     title: 'DJ Mixes',
     subtitle: 'High-energy playlists for quick starts.',
     curator: 'Black Hole DJ',
-    query: `latest dj mix tamil ${CURRENT_YEAR}`,
+    query: 'tamil dance hits mix',
   },
   {
     title: 'Late Night Playback',
     subtitle: 'Warm vocals, softer textures, slower nights.',
     curator: 'Black Hole Chill',
-    query: `fresh lofi tamil songs ${CURRENT_YEAR}`,
+    query: 'yuvan shankar raja lofi hits',
   },
 ];
 
@@ -83,7 +83,7 @@ export default function HomePage() {
   useEffect(() => {
     let active = true;
 
-    searchSongs(`latest trending tamil songs ${CURRENT_MONTH} ${CURRENT_YEAR}`, 1, 12)
+    searchSongs('latest tamil hits', 1, 12)
       .then((data) => {
         if (!active) return;
         setTrendingSongs(data.results);

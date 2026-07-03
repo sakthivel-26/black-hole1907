@@ -1,9 +1,10 @@
-import type { MouseEventHandler, ReactNode } from 'react';
+import { useState, type MouseEventHandler, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
   FiCheck,
   FiChevronUp,
+  FiClock,
   FiDownload,
   FiHeart,
   FiList,
@@ -22,6 +23,7 @@ import { downloadSongFile, formatDuration, getAudioQualityLabel, getImageUrl } f
 import { usePlayerStore } from '../store/usePlayerStore';
 
 export default function PlayerBar() {
+  const [showTimerMenu, setShowTimerMenu] = useState(false);
   const {
     currentSong,
     isPlaying,
@@ -33,6 +35,8 @@ export default function PlayerBar() {
     repeat,
     isLoading,
     isPlayerBarMinimized,
+    sleepTimer,
+    sleepTimerRemaining,
     togglePlay,
     nextSong,
     prevSong,
@@ -48,9 +52,17 @@ export default function PlayerBar() {
     addDownloadedSong,
     isDownloaded,
     setPlayerBarMinimized,
+    setSleepTimer,
   } = usePlayerStore();
 
   if (!currentSong) return null;
+
+  const formatTimer = (seconds: number | null): string => {
+    if (seconds === null) return '';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const liked = isLiked(currentSong.id);
@@ -260,6 +272,54 @@ export default function PlayerBar() {
               <PlayerCircleButton onClick={() => setShowQueue(true)} title="Queue">
                 <FiList size={16} />
               </PlayerCircleButton>
+
+              <div className="relative">
+                <PlayerCircleButton
+                  onClick={() => setShowTimerMenu(!showTimerMenu)}
+                  title={sleepTimerRemaining ? `Sleep timer: ${formatTimer(sleepTimerRemaining)} remaining` : "Set sleep timer"}
+                  active={!!sleepTimerRemaining}
+                >
+                  <div className="flex flex-col items-center justify-center relative">
+                    <FiClock size={16} />
+                    {sleepTimerRemaining && (
+                      <span className="absolute -top-3.5 -right-3.5 rounded-full bg-[#ff375f] px-1 py-0.5 text-[8px] font-bold text-white leading-none scale-90">
+                        {formatTimer(sleepTimerRemaining)}
+                      </span>
+                    )}
+                  </div>
+                </PlayerCircleButton>
+
+                {showTimerMenu && (
+                  <div className="absolute bottom-12 right-0 z-50 w-32 rounded-2xl border border-white/10 bg-[#28282b]/95 p-1 shadow-[0_20px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
+                    <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/35">Sleep Timer</div>
+                    <div className="h-px bg-white/8 my-1" />
+                    {[
+                      { label: 'Off', value: null },
+                      { label: '15 Mins', value: 15 },
+                      { label: '30 Mins', value: 30 },
+                      { label: '45 Mins', value: 45 },
+                      { label: '1 Hour', value: 60 },
+                    ].map((opt) => (
+                      <button
+                        key={opt.label}
+                        onClick={() => {
+                          setSleepTimer(opt.value);
+                          setShowTimerMenu(false);
+                        }}
+                        className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs font-medium transition ${
+                          (opt.value === sleepTimer)
+                            ? 'bg-[#ff375f] text-white'
+                            : 'text-white/70 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        <span>{opt.label}</span>
+                        {opt.value === sleepTimer && <FiCheck size={12} />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <PlayerCircleButton onClick={() => setPlayerBarMinimized(true)} title="Minimize player">
                 <FiMinus size={16} />
               </PlayerCircleButton>

@@ -251,19 +251,22 @@ function buildSearchVariants(query: string): string[] {
   if (!normalized) return [query];
 
   const words = normalized.split(' ').filter(Boolean);
-  const focusedWords = words.filter((word) => !SEARCH_STOP_WORDS.has(word));
+  // Avoid using generic stop words and fresh query words in sub-queries
+  const filterWords = new Set([...SEARCH_STOP_WORDS, ...FRESH_QUERY_WORDS]);
+  const focusedWords = words.filter((word) => !filterWords.has(word));
   const compactQuery = focusedWords.join(' ');
-  const titleFocusedQuery = focusedWords[0] || words[0] || normalized;
 
   const variants = [
     query.trim(),
     compactQuery,
-    titleFocusedQuery,
-    compactQuery ? `${compactQuery} original motion picture soundtrack` : '',
-    titleFocusedQuery ? `${titleFocusedQuery} original motion picture soundtrack` : '',
-    compactQuery ? `${compactQuery} original version` : '',
-    titleFocusedQuery ? `${titleFocusedQuery} original version` : '',
   ];
+
+  if (compactQuery) {
+    variants.push(
+      `${compactQuery} original motion picture soundtrack`,
+      `${compactQuery} original version`
+    );
+  }
 
   return Array.from(new Set(variants.map((item) => item.trim()).filter(Boolean)));
 }
@@ -373,6 +376,14 @@ function scoreSongResult(song: Song, query: string): number {
   let score = 0;
   // Strong boost for exact title match (normalized)
   if (songName === normalizedQuery) score += 220;
+  
+  // Clean boost when query matches the album name exactly (soundtrack searches)
+  const cleanQuery = normalizedQuery.replace(/\b(songs|song|movie|soundtrack|ost|bgm|theme)\b/gi, '').trim();
+  const cleanAlbum = albumName.replace(/\b(songs|song|movie|soundtrack|ost|bgm|theme)\b/gi, '').trim();
+  if (cleanAlbum && cleanQuery && cleanAlbum === cleanQuery) {
+    score += 280; // Highly popular soundtrack album songs go first
+  }
+
   // Partial title/album matches
   if (songName.includes(normalizedQuery)) score += 72;
   if (albumName.includes(normalizedQuery)) score += 36;

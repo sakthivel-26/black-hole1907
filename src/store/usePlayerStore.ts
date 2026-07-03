@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Song, QueueItem, RepeatMode, ViewMode, UserPlaylist } from '../types';
 import { getSongSuggestions, searchSongs } from '../services/api';
 import { getYTSongSuggestions } from '../services/youtube';
+import { getSimilarTracks } from '../services/lastfm';
 
 type RecentSongRow = {
   id: string;
@@ -70,11 +71,13 @@ interface PlayerState {
   // Library
   likedSongs: Song[];
   recentlyPlayed: Song[];
+  playlists: UserPlaylist[];
   downloadedSongs: Song[];
 
   // Audio features
   crossfade: number;
   sleepTimer: number | null;
+  sleepTimerRemaining: number | null;
 
   // Dynamic background
   dominantColor: string;
@@ -172,16 +175,13 @@ const getCoreTitle = (title: string): string => {
   let core = title.toLowerCase();
 
   // 1. Remove anything in parentheses or brackets that looks like a version/metadata
-  // We do this first because it often contains keywords that might confuse the separator split
   core = core.replace(/[\(\[][^\]\)]*(instrumental|karaoke|remix|mix|edit|cover|lofi|flip|version|reprise|tribute|slowed|reverb|from|original|ost|bgm|theme|soundtrack|official|video|audio|lyrics|full|hd|4k|hq|quality|jiosaavn|spotify|apple|video|song)[^\]\)]*[\)\]]/gi, '');
 
-  // 2. Remove common separators and everything after them if it looks like metadata
-  // e.g. "Song Name - Movie", "Song Name | Artist"
+  // 2. Remove common separators and everything after them
   const separators = ['-', '|', '–', '—', ':', '/'];
   for (const sep of separators) {
     if (core.includes(sep)) {
       const parts = core.split(sep);
-      // If the first part is a year (e.g. "2022 // Song"), take the second part
       if (/^\d{4}$/.test(parts[0].trim())) {
         core = parts[1] || parts[0];
       } else {
@@ -197,7 +197,7 @@ const getCoreTitle = (title: string): string => {
     core = core.replace(new RegExp(`\\b${word}\\b`, 'gi'), '');
   });
 
-  // 4. Remove any remaining empty parentheses/brackets
+  // 4. Remove any remaining empty parentheses
   core = core.replace(/[\(\[]\s*[\)\]]/g, '');
 
   return core.replace(/\s+/g, ' ').trim();
@@ -248,20 +248,17 @@ const isDuplicateTrack = (songA: Song, songB: Song): boolean => {
 
   // If core titles match exactly and they have at least one common artist
   if (coreA && coreB && coreA === coreB) {
-    const artistA = (songA.primaryArtists || '').toLowerCase();
-    const artistB = (songB.primaryArtists || '').toLowerCase();
-    const firstArtistA = artistA.split(',')[0].trim();
-    const firstArtistB = artistB.split(',')[0].trim();
-
-    if (firstArtistA === firstArtistB) return true;
+    const artistA = (songA.primaryArtists || '').toLowerCase().split(',')[0].trim();
+    const artistB = (songB.primaryArtists || '').toLowerCase().split(',')[0].trim();
+    if (artistA === artistB) return true;
   }
 
   // Duration + Artist overlap check (highly robust for foreign titles)
   const durationDiff = Math.abs((songA.duration || 0) - (songB.duration || 0));
-  if (durationDiff < 10 && songA.duration > 0) {
+  if (durationDiff < 15) {
     const artistA = (songA.primaryArtists || '').toLowerCase().split(',')[0].trim();
     const artistB = (songB.primaryArtists || '').toLowerCase().split(',')[0].trim();
-    if (artistA && artistB && artistA === artistB) {
+    if (artistA && artistB && (artistA.includes(artistB) || artistB.includes(artistA))) {
       return true;
     }
   }
@@ -275,8 +272,6 @@ const dedupeQueueItems = (items: QueueItem[]): QueueItem[] => {
 
   for (const item of items) {
     if (!item.id || seenIds.has(item.id)) continue;
-
-    // Check if this item is a duplicate of any item already accepted in the queue
     const isDup = deduped.some(acceptedItem => isDuplicateTrack(acceptedItem, item));
     if (isDup) continue;
 
@@ -422,80 +417,30 @@ const isTamilSong = (item: Song | QueueItem): boolean => {
   return sLang.includes('tamil') || isTamilArtist(item);
 };
 
-const getVibeSuggestionsFromLastFm = async (song: Song): Promise<Song[]> => {
-  try {
-    const apiKey = import.meta.env.VITE_LASTFM_API_KEY || 'b25b959554ed76058ac220b7b2e0a026';
-    const cleanArtist = song.primaryArtists.split(',')[0].replace(/\s*-\s*topic/gi, '').trim();
-    const cleanTitle = getCoreTitle(song.name);
-    
-    const url = `https://ws.audioscrobbler.com/2.0/?method=track.getsimilar&artist=${encodeURIComponent(cleanArtist)}&track=${encodeURIComponent(cleanTitle)}&api_key=${apiKey}&format=json&limit=15`;
-    
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Last.fm API status ${response.status}`);
-    
-    const data = await response.json();
-    const rawTracks = data?.similartracks?.track;
-    if (!Array.isArray(rawTracks) || rawTracks.length === 0) return [];
-    
-    // Filter out raw tracks that are duplicates of the current song
-    const filteredRaw = rawTracks.filter(t => {
-      const tName = t.name;
-      const tArtist = t.artist?.name || '';
-      const tempSong = { name: tName, primaryArtists: tArtist, duration: 0, id: '' } as any;
-      return !isDuplicateTrack(song, tempSong);
-    }).slice(0, 6); // Take top 6 unique tracks
-    
-    // Search Saavn/YT for these tracks in parallel
-    const searchPromises = filteredRaw.map(async (t) => {
-      try {
-        const query = `${t.name} ${t.artist?.name || ''}`;
-        const searchRes = await searchSongs(query);
-        if (searchRes.results && searchRes.results.length > 0) {
-          return searchRes.results[0];
-        }
-      } catch {}
-      
-      // Fallback virtual track: will search and fallback to YouTube when played
-      return {
-        id: `yt_search_${encodeURIComponent(t.name + ' ' + (t.artist?.name || ''))}`,
-        name: t.name,
-        album: { id: '', name: 'Last.fm Radio', url: '' },
-        year: '',
-        duration: t.duration || 240,
-        language: 'English',
-        playCount: '0',
-        hasLyrics: false,
-        label: 'Last.fm',
-        primaryArtists: t.artist?.name || 'Unknown Artist',
-        primaryArtistsId: '',
-        featuredArtists: '',
-        image: [{ quality: '500x500', url: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=250&auto=format&fit=crop' }],
-        downloadUrl: [],
-        url: '',
-      } as any;
-    });
-    
-    const results = await Promise.all(searchPromises);
-    return results.filter(Boolean) as Song[];
-  } catch (e) {
-    console.error('Last.fm suggestions failed:', e);
-    return [];
-  }
-};
-
 const fetchVibeSuggestions = async (song: Song): Promise<Song[]> => {
   try {
     // 1. Try Last.fm Suggestions (extremely high-quality recommendations database)
-    let suggestions = await getVibeSuggestionsFromLastFm(song);
+    const similarQueries = await getSimilarTracks(song);
+    let suggestions: Song[] = [];
     
-    // 2. Fallback to Saavn Suggestions if Last.fm returned nothing
-    if (suggestions.length === 0 && !song.id.startsWith('yt_')) {
-      suggestions = await getSongSuggestions(song.id);
+    if (similarQueries.length > 0) {
+      // Search for the top 5 similar songs on the music API
+      const searchPromises = similarQueries.slice(0, 5).map(query => searchSongs(query, 1, 1));
+      const searchResults = await Promise.allSettled(searchPromises);
+      suggestions = searchResults
+        .flatMap(r => r.status === 'fulfilled' ? r.value.results : []);
     }
-    
-    // 3. Fallback to YouTube suggestions if still empty
-    if (suggestions.length === 0) {
-      suggestions = await getYTSongSuggestions(song);
+
+    // 2. Fallback to Saavn Suggestions if Last.fm returned nothing
+    if (suggestions.length < 5 && !song.id.startsWith('yt_')) {
+      const native = await getSongSuggestions(song.id);
+      suggestions = dedupeQueueItems([...suggestions, ...native].map(toQueueItem));
+    }
+
+    // 3. Last fallback: YouTube
+    if (suggestions.length < 3) {
+      const yt = await getYTSongSuggestions(song);
+      suggestions = dedupeQueueItems([...suggestions, ...yt].map(toQueueItem));
     }
     return suggestions;
   } catch (e) {
@@ -537,6 +482,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   crossfade: loadFromStorage('crossfade', 0),
   sleepTimer: null,
+  sleepTimerRemaining: null,
 
   dominantColor: '#1a1a2e',
 
@@ -548,9 +494,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const isFromSearch = state.currentView === 'search';
 
     if (isFromSearch) {
-      // Apple Music Style: If playing from search, don't fill the queue with the rest of search results.
-      // Instead, start a "Radio" based on this song.
-      // We set the queue to JUST this song initially, and the suggestion logic will populate the rest.
+      // Apple Music Style: Clear repetitive results and start a radio
       newQueue = [toQueueItem(song)];
       newIndex = 0;
     } else if (queueSongs && queueSongs.length > 0) {
@@ -568,39 +512,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       }
     }
 
-    if (state.shuffle) {
-      const current = newQueue[newIndex];
-      const others = newQueue.filter((_, i) => i !== newIndex);
-      for (let i = others.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [others[i], others[j]] = [others[j], others[i]];
-      }
-      newQueue = dedupeQueueItems([current, ...others]);
-      newIndex = 0;
-    }
-
-    // Reorder the remaining queue to prioritize the current song's language
-    const currentLang = (song.language || '').toLowerCase();
-    const isCurrentTamil = isTamilSong(song);
-
-    if (newQueue.length > 1 && !state.shuffle) {
-      const played = newQueue.slice(0, newIndex + 1);
-      const remaining = newQueue.slice(newIndex + 1);
-      
-      const sameLang: QueueItem[] = [];
-      const otherLang: QueueItem[] = [];
-      
-      for (const item of remaining) {
-        const isMatch = isCurrentTamil ? isTamilSong(item) : (currentLang && (item.language || '').toLowerCase().includes(currentLang));
-        if (isMatch) {
-          sameLang.push(item);
-        } else {
-          otherLang.push(item);
-        }
-      }
-      newQueue = [...played, ...sameLang, ...otherLang];
-    }
-
     set({
       currentSong: song,
       queue: newQueue,
@@ -611,64 +522,28 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       isLoading: true,
     });
 
-    // Add to recently played
     get().addToRecentlyPlayed(song);
 
-    // Auto-load suggestions for queue (prioritize matching language/vibe)
-    // If playing from search, we prefer radio-mode (suggestions) over search-list
-    const shouldFetchSuggestions = isFromSearch || newQueue.length <= 5;
+    // Fetch Apple-style radio suggestions
+    fetchVibeSuggestions(song).then(suggestions => {
+      if (suggestions.length > 0) {
+        const stateNow = get();
+        const currentQueue = stateNow.queue;
+        const curIndex = stateNow.queueIndex;
+        if (curIndex === -1) return;
 
-    if (shouldFetchSuggestions) {
-      fetchVibeSuggestions(song).then(suggestions => {
-        if (suggestions.length > 0) {
-          const stateNow = get();
-          const currentQueue = stateNow.queue;
-          const curIndex = stateNow.queueIndex;
-          if (curIndex === -1) return;
+        const existingIds = new Set(currentQueue.map(q => q.id));
+        const newSuggestions = suggestions
+          .filter(s => !existingIds.has(s.id) && !isDuplicateTrack(song, s))
+          .map(toQueueItem);
 
-          const existingIds = new Set(currentQueue.map(q => q.id));
-          const existingCoreKeys = new Set(currentQueue.map(q => `${getCoreTitle(q.name)}|${(q.primaryArtists || '').split(',')[0].toLowerCase().trim()}`));
-
-          const newSuggestions = suggestions
-            .filter(s => {
-              const idExists = existingIds.has(s.id);
-              const coreTitle = getCoreTitle(s.name);
-              const key = `${coreTitle}|${(s.primaryArtists || '').split(',')[0].toLowerCase().trim()}`;
-              const coreExists = existingCoreKeys.has(key);
-
-              // Ensure we don't pick the same song or repetitive versions
-              const currentCore = getCoreTitle(song.name);
-              return !idExists && !coreExists && coreTitle !== currentCore;
-            })
-            .map(toQueueItem);
-            
-          if (newSuggestions.length > 0) {
-            const currentLang = (song.language || '').toLowerCase();
-            const isCurrentTamil = isTamilSong(song);
-
-            const sameLanguage = newSuggestions.filter(s => {
-              if (isCurrentTamil) return isTamilSong(s);
-              const sLang = (s.language || '').toLowerCase();
-              return currentLang && sLang.includes(currentLang);
-            });
-            const otherLanguages = newSuggestions.filter(s => {
-              if (isCurrentTamil) return !isTamilSong(s);
-              const sLang = (s.language || '').toLowerCase();
-              return !(currentLang && sLang.includes(currentLang));
-            });
-
-            // Limit to top suggestions to keep variety
-            const prioritized = [...sameLanguage, ...otherLanguages].slice(0, 20);
-            
-            const played = currentQueue.slice(0, curIndex + 1);
-            // If from search, discard the rest of the search results and strictly follow the vibe radio
-            const remaining = isFromSearch ? [] : currentQueue.slice(curIndex + 1);
-            
-            set({ queue: dedupeQueueItems([...played, ...prioritized, ...remaining]) });
-          }
+        if (newSuggestions.length > 0) {
+          const played = currentQueue.slice(0, curIndex + 1);
+          const remaining = isFromSearch ? [] : currentQueue.slice(curIndex + 1);
+          set({ queue: dedupeQueueItems([...played, ...newSuggestions, ...remaining]) });
         }
-      });
-    }
+      }
+    });
   },
 
   togglePlay: () => set(s => ({ isPlaying: !s.isPlaying })),
@@ -679,87 +554,31 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const { queue, queueIndex, repeat, currentSong } = get();
     if (queue.length === 0) return;
 
-    let nextIndex: number;
     if (repeat === 'one') {
-      nextIndex = queueIndex;
       set({ currentTime: 0 });
-    } else if (queueIndex < queue.length - 1) {
-      nextIndex = queueIndex + 1;
-    } else if (repeat === 'all') {
-      nextIndex = 0;
-    } else {
-      // Reached the end of the queue, and repeat is 'off'.
-      // Autoplay: fetch suggestions based on current song to keep the vibe going!
-      if (currentSong) {
-        set({ isLoading: true });
-        try {
-          const suggestions = await fetchVibeSuggestions(currentSong);
-          if (suggestions.length > 0) {
-            const currentQueue = get().queue;
-            const existingIds = new Set(currentQueue.map(q => q.id));
-            const existingCoreKeys = new Set(currentQueue.map(q => `${getCoreTitle(q.name)}|${(q.primaryArtists || '').split(',')[0].toLowerCase().trim()}`));
-
-            const newSuggestions = suggestions
-              .filter(s => {
-                const idExists = existingIds.has(s.id);
-                const key = `${getCoreTitle(s.name)}|${(s.primaryArtists || '').split(',')[0].toLowerCase().trim()}`;
-                const coreExists = existingCoreKeys.has(key);
-                return !idExists && !coreExists;
-              })
-              .map(toQueueItem);
-              
-            if (newSuggestions.length > 0) {
-              const currentLang = (currentSong.language || '').toLowerCase();
-              const isCurrentTamil = isTamilSong(currentSong);
-              
-              const sameLanguage = newSuggestions.filter(s => {
-                if (isCurrentTamil) return isTamilSong(s);
-                const sLang = (s.language || '').toLowerCase();
-                return currentLang && sLang.includes(currentLang);
-              });
-              const otherLanguages = newSuggestions.filter(s => {
-                if (isCurrentTamil) return !isTamilSong(s);
-                const sLang = (s.language || '').toLowerCase();
-                return !(currentLang && sLang.includes(currentLang));
-              });
-              const prioritized = [...sameLanguage, ...otherLanguages];
-
-              const updatedQueue = dedupeQueueItems([...currentQueue, ...prioritized]);
-              const nextIdx = queueIndex + 1;
-              const nextSong = updatedQueue[nextIdx];
-              
-              if (nextSong) {
-                set({
-                  queue: updatedQueue,
-                  queueIndex: nextIdx,
-                  currentSong: nextSong,
-                  currentTime: 0,
-                  isPlaying: true,
-                  isLoading: false,
-                });
-                get().addToRecentlyPlayed(nextSong);
-                return;
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Autoplay suggestion fetch failed:', error);
-        }
-      }
-      set({ isPlaying: false, isLoading: false });
       return;
     }
 
-    const nextSong = queue[nextIndex];
-    if (nextSong) {
-      set({
-        currentSong: nextSong,
-        queueIndex: nextIndex,
-        currentTime: 0,
-        isPlaying: true,
-        isLoading: true,
-      });
-      get().addToRecentlyPlayed(nextSong);
+    if (queueIndex < queue.length - 1) {
+      const nextIdx = queueIndex + 1;
+      set({ currentSong: queue[nextIdx], queueIndex: nextIdx, currentTime: 0, isPlaying: true });
+      return;
+    }
+
+    if (repeat === 'all') {
+      set({ currentSong: queue[0], queueIndex: 0, currentTime: 0, isPlaying: true });
+      return;
+    }
+
+    // Autoplay logic
+    if (currentSong) {
+      set({ isLoading: true });
+      const suggestions = await fetchVibeSuggestions(currentSong);
+      const newSuggestions = suggestions.filter(s => !get().queue.some(q => q.id === s.id)).map(toQueueItem);
+      if (newSuggestions.length > 0) {
+        const updatedQueue = [...get().queue, ...newSuggestions];
+        set({ queue: updatedQueue, currentSong: newSuggestions[0], queueIndex: queueIndex + 1, currentTime: 0, isPlaying: true, isLoading: false });
+      }
     }
   },
 
@@ -769,18 +588,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       set({ currentTime: 0 });
       return;
     }
-    if (queue.length === 0) return;
-
-    const prevIndex = queueIndex > 0 ? queueIndex - 1 : queue.length - 1;
-    const prevSong = queue[prevIndex];
-    if (prevSong) {
-      set({
-        currentSong: prevSong,
-        queueIndex: prevIndex,
-        currentTime: 0,
-        isPlaying: true,
-        isLoading: true,
-      });
+    if (queueIndex > 0) {
+      const prevIdx = queueIndex - 1;
+      set({ currentSong: queue[prevIdx], queueIndex: prevIdx, currentTime: 0, isPlaying: true });
     }
   },
 
@@ -796,94 +606,42 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setIsLoading: (isLoading) => set({ isLoading }),
 
   toggleShuffle: () => {
-    const state = get();
-    const newShuffle = !state.shuffle;
-    if (newShuffle) {
-      const current = state.queue[state.queueIndex];
-      const others = state.queue.filter((_, i) => i !== state.queueIndex);
+    const { queue, queueIndex, shuffle, originalQueue, currentSong } = get();
+    if (!shuffle) {
+      const current = queue[queueIndex];
+      const others = queue.filter((_, i) => i !== queueIndex);
       for (let i = others.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [others[i], others[j]] = [others[j], others[i]];
       }
-      set({ queue: dedupeQueueItems([current, ...others]), queueIndex: 0, shuffle: true });
+      set({ queue: [current, ...others], queueIndex: 0, shuffle: true });
     } else {
-      const currentSong = state.currentSong;
-      const originalIndex = state.originalQueue.findIndex(q => q.id === currentSong?.id);
-      set({ queue: dedupeQueueItems([...state.originalQueue]), queueIndex: Math.max(0, originalIndex), shuffle: false });
+      const originalIndex = originalQueue.findIndex(q => q.id === currentSong?.id);
+      set({ queue: [...originalQueue], queueIndex: Math.max(0, originalIndex), shuffle: false });
     }
-    saveToStorage('shuffle', newShuffle);
   },
 
   toggleRepeat: () => {
     const modes: RepeatMode[] = ['off', 'all', 'one'];
-    const current = get().repeat;
-    const nextIndex = (modes.indexOf(current) + 1) % modes.length;
-    const next = modes[nextIndex];
+    const next = modes[(modes.indexOf(get().repeat) + 1) % modes.length];
     set({ repeat: next });
     saveToStorage('repeat', next);
   },
 
-  addToQueue: (song) => {
-    set((state) => ({ queue: dedupeQueueItems([...state.queue, toQueueItem(song)]) }));
-  },
-
+  addToQueue: (song) => set(s => ({ queue: dedupeQueueItems([...s.queue, toQueueItem(song)]) })),
   removeFromQueue: (index) => {
-    const state = get();
-    const newQueue = state.queue.filter((_, i) => i !== index);
-    let newIndex = state.queueIndex;
-    if (index < state.queueIndex) newIndex--;
-    if (index === state.queueIndex && newIndex >= newQueue.length) newIndex = newQueue.length - 1;
-    set({ queue: newQueue, queueIndex: newIndex });
+    const { queue, queueIndex } = get();
+    const newQueue = queue.filter((_, i) => i !== index);
+    set({ queue: newQueue, queueIndex: index < queueIndex ? queueIndex - 1 : queueIndex });
   },
-
   clearQueue: () => set({ queue: [], queueIndex: -1 }),
+  playFromQueue: (index) => set({ currentSong: get().queue[index], queueIndex: index, currentTime: 0, isPlaying: true }),
 
-  playFromQueue: (index) => {
-    const song = get().queue[index];
-    if (song) {
-      set({
-        currentSong: song,
-        queueIndex: index,
-        currentTime: 0,
-        isPlaying: true,
-        isLoading: true,
-      });
-      get().addToRecentlyPlayed(song);
-    }
-  },
-
-  setView: (view, data) => {
-    const { currentView, viewData, viewHistory } = get();
-    const isSameView = currentView === view;
-    const isSameData = JSON.stringify(viewData) === JSON.stringify(data);
-    let newHistory = viewHistory;
-
-    if (!isSameView || !isSameData) {
-      newHistory = [...viewHistory, { view: currentView, data: viewData }].slice(-50);
-    }
-
-    set({
-      currentView: view,
-      viewData: data,
-      showNowPlaying: false,
-      isMobileMenuOpen: false,
-      viewHistory: newHistory,
-    });
-  },
+  setView: (view, data) => set(s => ({ currentView: view, viewData: data, viewHistory: [...s.viewHistory, { view: s.currentView, data: s.viewData }].slice(-50) })),
   goBack: () => {
-    const { viewHistory } = get();
-    if (viewHistory.length === 0) return;
-    const newHistory = [...viewHistory];
-    const prev = newHistory.pop();
-    if (prev) {
-      set({
-        currentView: prev.view,
-        viewData: prev.data,
-        showNowPlaying: false,
-        isMobileMenuOpen: false,
-        viewHistory: newHistory,
-      });
-    }
+    const history = [...get().viewHistory];
+    const last = history.pop();
+    if (last) set({ currentView: last.view, viewData: last.data, viewHistory: history });
   },
   setShowNowPlaying: (show) => set({ showNowPlaying: show }),
   setShowQueue: (show) => set({ showQueue: show }),
@@ -893,112 +651,102 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setPlayerBarMinimized: (minimized) => set({ isPlayerBarMinimized: minimized }),
 
   toggleLike: (song) => {
-    const state = get();
-    const isCurrentlyLiked = state.likedSongs.some(s => s.id === song.id);
-    const newLiked = isCurrentlyLiked
-      ? state.likedSongs.filter(s => s.id !== song.id)
-      : [song, ...state.likedSongs];
-    set({ likedSongs: newLiked });
-    saveToStorage('likedSongs', newLiked);
+    const liked = get().likedSongs.some(s => s.id === song.id)
+      ? get().likedSongs.filter(s => s.id !== song.id)
+      : [song, ...get().likedSongs];
+    set({ likedSongs: liked });
+    saveToStorage('likedSongs', liked);
   },
-
   isLiked: (id) => get().likedSongs.some(s => s.id === id),
 
   addToRecentlyPlayed: (song) => {
-    const state = get();
-    const filtered = state.recentlyPlayed.filter(s => s.id !== song.id);
-    const newRecent = [song, ...filtered].slice(0, 50);
-    set({ recentlyPlayed: newRecent });
-    saveToStorage('recentlyPlayed', newRecent);
-    void syncRecentSongs(newRecent);
+    const recent = [song, ...get().recentlyPlayed.filter(s => s.id !== song.id)].slice(0, 50);
+    set({ recentlyPlayed: recent });
+    saveToStorage('recentlyPlayed', recent);
+    void syncRecentSongs(recent);
   },
 
   addDownloadedSong: (song) => {
-    const state = get();
-    const filtered = state.downloadedSongs.filter(s => s.id !== song.id);
-    const downloadedSongs = [song, ...filtered];
-    set({ downloadedSongs });
-    saveToStorage('downloadedSongs', downloadedSongs);
+    const downloaded = [song, ...get().downloadedSongs.filter(s => s.id !== song.id)];
+    set({ downloadedSongs: downloaded });
+    saveToStorage('downloadedSongs', downloaded);
   },
-
   removeDownloadedSong: (songId) => {
-    const downloadedSongs = get().downloadedSongs.filter(song => song.id !== songId);
-    set({ downloadedSongs });
-    saveToStorage('downloadedSongs', downloadedSongs);
+    const downloaded = get().downloadedSongs.filter(s => s.id !== songId);
+    set({ downloadedSongs: downloaded });
+    saveToStorage('downloadedSongs', downloaded);
   },
-
-  isDownloaded: (id) => get().downloadedSongs.some(song => song.id === id),
+  isDownloaded: (id) => get().downloadedSongs.some(s => s.id === id),
 
   createPlaylist: (name, description = '') => {
-    const newPlaylist: UserPlaylist = {
-      id: `pl_${Date.now()}`,
-      name,
-      description,
-      coverImage: '',
-      songs: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    const playlists = [newPlaylist, ...get().playlists];
+    const playlists = [{ id: `pl_${Date.now()}`, name, description, coverImage: '', songs: [], createdAt: Date.now(), updatedAt: Date.now() }, ...get().playlists];
     set({ playlists });
     saveToStorage('playlists', playlists);
     void syncPlaylists(playlists);
   },
-
-  addToPlaylist: (playlistId, song) => {
-    const playlists = get().playlists.map(p => {
-      if (p.id === playlistId && !p.songs.some(s => s.id === song.id)) {
-        return { ...p, songs: [...p.songs, song], updatedAt: Date.now() };
-      }
-      return p;
-    });
+  addToPlaylist: (id, song) => {
+    const playlists = get().playlists.map(p => p.id === id && !p.songs.some(s => s.id === song.id) ? { ...p, songs: [...p.songs, song], updatedAt: Date.now() } : p);
     set({ playlists });
     saveToStorage('playlists', playlists);
     void syncPlaylists(playlists);
   },
-
-  removeFromPlaylist: (playlistId, songId) => {
-    const playlists = get().playlists.map(p => {
-      if (p.id === playlistId) {
-        return { ...p, songs: p.songs.filter(s => s.id !== songId), updatedAt: Date.now() };
-      }
-      return p;
-    });
+  removeFromPlaylist: (id, songId) => {
+    const playlists = get().playlists.map(p => p.id === id ? { ...p, songs: p.songs.filter(s => s.id !== songId), updatedAt: Date.now() } : p);
     set({ playlists });
     saveToStorage('playlists', playlists);
     void syncPlaylists(playlists);
   },
-
-  deletePlaylist: (playlistId) => {
-    const playlists = get().playlists.filter(p => p.id !== playlistId);
+  deletePlaylist: (id) => {
+    const playlists = get().playlists.filter(p => p.id !== id);
     set({ playlists });
     saveToStorage('playlists', playlists);
     void syncPlaylists(playlists);
   },
 
   hydrateCloudData: async () => {
-    try {
-      const cloudLibrary = await loadCloudLibrary();
-      if (!cloudLibrary) return;
-
-      set({
-        recentlyPlayed: cloudLibrary.recentlyPlayed,
-        playlists: cloudLibrary.playlists,
-      });
-
-      saveToStorage('recentlyPlayed', cloudLibrary.recentlyPlayed);
-      saveToStorage('playlists', cloudLibrary.playlists);
-    } catch (error) {
-      console.error('Failed to hydrate cloud data:', error);
+    const cloud = await loadCloudLibrary();
+    if (cloud) {
+      set({ recentlyPlayed: cloud.recentlyPlayed, playlists: cloud.playlists });
+      saveToStorage('recentlyPlayed', cloud.recentlyPlayed);
+      saveToStorage('playlists', cloud.playlists);
     }
   },
 
-  setCrossfade: (seconds) => {
-    set({ crossfade: seconds });
-    saveToStorage('crossfade', seconds);
+  setCrossfade: (s) => { set({ crossfade: s }); saveToStorage('crossfade', s); },
+  setSleepTimer: (m) => {
+    if ((globalThis as any)._sleepTimerInterval) {
+      clearInterval((globalThis as any)._sleepTimerInterval);
+      (globalThis as any)._sleepTimerInterval = null;
+    }
+
+    if (m === null) {
+      set({ sleepTimer: null, sleepTimerRemaining: null });
+      return;
+    }
+
+    const seconds = m * 60;
+    set({ sleepTimer: m, sleepTimerRemaining: seconds });
+
+    (globalThis as any)._sleepTimerInterval = setInterval(() => {
+      const state = get();
+      const remaining = state.sleepTimerRemaining;
+      if (remaining === null || remaining <= 0) {
+        clearInterval((globalThis as any)._sleepTimerInterval);
+        (globalThis as any)._sleepTimerInterval = null;
+        set({ sleepTimer: null, sleepTimerRemaining: null });
+        return;
+      }
+
+      const nextRemaining = remaining - 1;
+      if (nextRemaining === 0) {
+        clearInterval((globalThis as any)._sleepTimerInterval);
+        (globalThis as any)._sleepTimerInterval = null;
+        get().setIsPlaying(false);
+        set({ sleepTimer: null, sleepTimerRemaining: null });
+      } else {
+        set({ sleepTimerRemaining: nextRemaining });
+      }
+    }, 1000);
   },
-
-  setSleepTimer: (minutes) => set({ sleepTimer: minutes }),
-
-  setDominantColor: (color) => set({ dominantColor: color }),
+  setDominantColor: (c) => set({ dominantColor: c }),
 }));
