@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Song, QueueItem, RepeatMode, ViewMode, UserPlaylist } from '../types';
-import { getSongSuggestions } from '../services/api';
+import { getSongSuggestions, searchSongs } from '../services/api';
 import { getYTSongSuggestions } from '../services/youtube';
 
 type RecentSongRow = {
@@ -422,12 +422,78 @@ const isTamilSong = (item: Song | QueueItem): boolean => {
   return sLang.includes('tamil') || isTamilArtist(item);
 };
 
+const getVibeSuggestionsFromLastFm = async (song: Song): Promise<Song[]> => {
+  try {
+    const apiKey = import.meta.env.VITE_LASTFM_API_KEY || 'b25b959554ed76058ac220b7b2e0a026';
+    const cleanArtist = song.primaryArtists.split(',')[0].replace(/\s*-\s*topic/gi, '').trim();
+    const cleanTitle = getCoreTitle(song.name);
+    
+    const url = `https://ws.audioscrobbler.com/2.0/?method=track.getsimilar&artist=${encodeURIComponent(cleanArtist)}&track=${encodeURIComponent(cleanTitle)}&api_key=${apiKey}&format=json&limit=15`;
+    
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Last.fm API status ${response.status}`);
+    
+    const data = await response.json();
+    const rawTracks = data?.similartracks?.track;
+    if (!Array.isArray(rawTracks) || rawTracks.length === 0) return [];
+    
+    // Filter out raw tracks that are duplicates of the current song
+    const filteredRaw = rawTracks.filter(t => {
+      const tName = t.name;
+      const tArtist = t.artist?.name || '';
+      const tempSong = { name: tName, primaryArtists: tArtist, duration: 0, id: '' } as any;
+      return !isDuplicateTrack(song, tempSong);
+    }).slice(0, 6); // Take top 6 unique tracks
+    
+    // Search Saavn/YT for these tracks in parallel
+    const searchPromises = filteredRaw.map(async (t) => {
+      try {
+        const query = `${t.name} ${t.artist?.name || ''}`;
+        const searchRes = await searchSongs(query);
+        if (searchRes.results && searchRes.results.length > 0) {
+          return searchRes.results[0];
+        }
+      } catch {}
+      
+      // Fallback virtual track: will search and fallback to YouTube when played
+      return {
+        id: `yt_search_${encodeURIComponent(t.name + ' ' + (t.artist?.name || ''))}`,
+        name: t.name,
+        album: { id: '', name: 'Last.fm Radio', url: '' },
+        year: '',
+        duration: t.duration || 240,
+        language: 'English',
+        playCount: '0',
+        hasLyrics: false,
+        label: 'Last.fm',
+        primaryArtists: t.artist?.name || 'Unknown Artist',
+        primaryArtistsId: '',
+        featuredArtists: '',
+        image: [{ quality: '500x500', url: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=250&auto=format&fit=crop' }],
+        downloadUrl: [],
+        url: '',
+      } as any;
+    });
+    
+    const results = await Promise.all(searchPromises);
+    return results.filter(Boolean) as Song[];
+  } catch (e) {
+    console.error('Last.fm suggestions failed:', e);
+    return [];
+  }
+};
+
 const fetchVibeSuggestions = async (song: Song): Promise<Song[]> => {
   try {
-    let suggestions: Song[] = [];
-    if (!song.id.startsWith('yt_')) {
+    // 1. Try Last.fm Suggestions (extremely high-quality recommendations database)
+    let suggestions = await getVibeSuggestionsFromLastFm(song);
+    
+    // 2. Fallback to Saavn Suggestions if Last.fm returned nothing
+    if (suggestions.length === 0 && !song.id.startsWith('yt_')) {
       suggestions = await getSongSuggestions(song.id);
     }
+    
+    // 3. Fallback to YouTube suggestions if still empty
     if (suggestions.length === 0) {
       suggestions = await getYTSongSuggestions(song);
     }
@@ -479,13 +545,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     let newQueue: QueueItem[];
     let newIndex: number;
 
-    if (queueSongs && queueSongs.length > 0) {
-      // If from search, we only take the first 5 results to keep the queue clean,
-      // the suggestion logic below will fill it with variety.
-      const isFromSearch = state.currentView === 'search';
-      const sourceList = isFromSearch ? queueSongs.slice(0, 8) : queueSongs;
+    const isFromSearch = state.currentView === 'search';
 
-      newQueue = dedupeQueueItems(sourceList.map(toQueueItem));
+    if (isFromSearch) {
+      // Apple Music Style: If playing from search, don't fill the queue with the rest of search results.
+      // Instead, start a "Radio" based on this song.
+      // We set the queue to JUST this song initially, and the suggestion logic will populate the rest.
+      newQueue = [toQueueItem(song)];
+      newIndex = 0;
+    } else if (queueSongs && queueSongs.length > 0) {
+      newQueue = dedupeQueueItems(queueSongs.map(toQueueItem));
       newIndex = newQueue.findIndex((item) => item.id === song.id);
       if (newIndex === -1) newIndex = 0;
     } else {
@@ -547,8 +616,6 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     // Auto-load suggestions for queue (prioritize matching language/vibe)
     // If playing from search, we prefer radio-mode (suggestions) over search-list
-    const currentView = state.currentView;
-    const isFromSearch = currentView === 'search';
     const shouldFetchSuggestions = isFromSearch || newQueue.length <= 5;
 
     if (shouldFetchSuggestions) {
@@ -565,13 +632,20 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           const newSuggestions = suggestions
             .filter(s => {
               const idExists = existingIds.has(s.id);
-              const key = `${getCoreTitle(s.name)}|${(s.primaryArtists || '').split(',')[0].toLowerCase().trim()}`;
+              const coreTitle = getCoreTitle(s.name);
+              const key = `${coreTitle}|${(s.primaryArtists || '').split(',')[0].toLowerCase().trim()}`;
               const coreExists = existingCoreKeys.has(key);
-              return !idExists && !coreExists;
+
+              // Ensure we don't pick the same song or repetitive versions
+              const currentCore = getCoreTitle(song.name);
+              return !idExists && !coreExists && coreTitle !== currentCore;
             })
             .map(toQueueItem);
             
           if (newSuggestions.length > 0) {
+            const currentLang = (song.language || '').toLowerCase();
+            const isCurrentTamil = isTamilSong(song);
+
             const sameLanguage = newSuggestions.filter(s => {
               if (isCurrentTamil) return isTamilSong(s);
               const sLang = (s.language || '').toLowerCase();
@@ -582,10 +656,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
               const sLang = (s.language || '').toLowerCase();
               return !(currentLang && sLang.includes(currentLang));
             });
-            const prioritized = [...sameLanguage, ...otherLanguages];
+
+            // Limit to top suggestions to keep variety
+            const prioritized = [...sameLanguage, ...otherLanguages].slice(0, 20);
             
             const played = currentQueue.slice(0, curIndex + 1);
-            const remaining = isFromSearch ? [] : currentQueue.slice(curIndex + 1); // Clear search list if from search to prioritize "vibe"
+            // If from search, discard the rest of the search results and strictly follow the vibe radio
+            const remaining = isFromSearch ? [] : currentQueue.slice(curIndex + 1);
             
             set({ queue: dedupeQueueItems([...played, ...prioritized, ...remaining]) });
           }
