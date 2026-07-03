@@ -168,16 +168,39 @@ const songFromRecentRow = (row: RecentSongRow): Song => ({
 });
 
 const getCoreTitle = (title: string): string => {
-  return (title || '')
-    .toLowerCase()
-    .replace(/\(from ".*?"\)/gi, '')
-    .replace(/\[from ".*?"\]/gi, '')
-    .replace(/\(.*? (remix|mix|edit|cover|lofi|flip|version|reprise|tribute|slowed|reverb|instrumental|karaoke|bgm|violin|flute|piano|lyric|lyrics|video|audio)\)/gi, '')
-    .replace(/\[.*? (remix|mix|edit|cover|lofi|flip|version|reprise|tribute|slowed|reverb|instrumental|karaoke|bgm|violin|flute|piano|lyric|lyrics|video|audio)\]/gi, '')
-    .replace(/\(original.*?\)/gi, '')
-    .replace(/ - (single|ep|remix|mix|edit|cover|lofi|flip|version|reprise|tribute|instrumental|karaoke|bgm|lyric|lyrics|video|audio)$/gi, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  if (!title) return '';
+  let core = title.toLowerCase();
+
+  // 1. Remove anything in parentheses or brackets that looks like a version/metadata
+  // We do this first because it often contains keywords that might confuse the separator split
+  core = core.replace(/[\(\[][^\]\)]*(instrumental|karaoke|remix|mix|edit|cover|lofi|flip|version|reprise|tribute|slowed|reverb|from|original|ost|bgm|theme|soundtrack|official|video|audio|lyrics|full|hd|4k|hq|quality|jiosaavn|spotify|apple|video|song)[^\]\)]*[\)\]]/gi, '');
+
+  // 2. Remove common separators and everything after them if it looks like metadata
+  // e.g. "Song Name - Movie", "Song Name | Artist"
+  const separators = ['-', '|', '–', '—', ':', '/'];
+  for (const sep of separators) {
+    if (core.includes(sep)) {
+      const parts = core.split(sep);
+      // If the first part is a year (e.g. "2022 // Song"), take the second part
+      if (/^\d{4}$/.test(parts[0].trim())) {
+        core = parts[1] || parts[0];
+      } else {
+        core = parts[0];
+      }
+      break;
+    }
+  }
+
+  // 3. Remove standalone common noise words
+  const noise = ['official', 'video', 'audio', 'song', 'full', 'lyrics', 'hd', '4k', 'hq', 'track', 'music'];
+  noise.forEach(word => {
+    core = core.replace(new RegExp(`\\b${word}\\b`, 'gi'), '');
+  });
+
+  // 4. Remove any remaining empty parentheses/brackets
+  core = core.replace(/[\(\[]\s*[\)\]]/g, '');
+
+  return core.replace(/\s+/g, ' ').trim();
 };
 
 const isDuplicateTrack = (songA: Song, songB: Song): boolean => {
@@ -202,7 +225,9 @@ const isDuplicateTrack = (songA: Song, songB: Song): boolean => {
   const phoneB = normalizePhonetic(cleanB);
 
   if (phoneA && phoneB) {
-    if (phoneA.includes(phoneB) || phoneB.includes(phoneA)) {
+    if (phoneA === phoneB) return true;
+    const minLen = Math.min(phoneA.length, phoneB.length);
+    if (minLen >= 5 && (phoneA.includes(phoneB) || phoneB.includes(phoneA))) {
       return true;
     }
   }
@@ -211,17 +236,32 @@ const isDuplicateTrack = (songA: Song, songB: Song): boolean => {
   const phoneCoreB = normalizePhonetic(getCoreTitle(songB.name));
 
   if (phoneCoreA && phoneCoreB) {
-    if (phoneCoreA.includes(phoneCoreB) || phoneCoreB.includes(phoneCoreA)) {
+    if (phoneCoreA === phoneCoreB) return true;
+    const minLen = Math.min(phoneCoreA.length, phoneCoreB.length);
+    if (minLen >= 5 && (phoneCoreA.includes(phoneCoreB) || phoneCoreB.includes(phoneCoreA))) {
       return true;
     }
   }
 
-  // Duration + Artist overlap check (highly robust for foreign/Tamil titles)
+  const coreA = getCoreTitle(songA.name);
+  const coreB = getCoreTitle(songB.name);
+
+  // If core titles match exactly and they have at least one common artist
+  if (coreA && coreB && coreA === coreB) {
+    const artistA = (songA.primaryArtists || '').toLowerCase();
+    const artistB = (songB.primaryArtists || '').toLowerCase();
+    const firstArtistA = artistA.split(',')[0].trim();
+    const firstArtistB = artistB.split(',')[0].trim();
+
+    if (firstArtistA === firstArtistB) return true;
+  }
+
+  // Duration + Artist overlap check (highly robust for foreign titles)
   const durationDiff = Math.abs((songA.duration || 0) - (songB.duration || 0));
-  if (durationDiff < 15) {
-    const artistA = (songA.primaryArtists || '').toLowerCase().split(',')[0].split('&')[0].trim();
-    const artistB = (songB.primaryArtists || '').toLowerCase().split(',')[0].split('&')[0].trim();
-    if (artistA && artistB && (artistA.includes(artistB) || artistB.includes(artistA))) {
+  if (durationDiff < 10 && songA.duration > 0) {
+    const artistA = (songA.primaryArtists || '').toLowerCase().split(',')[0].trim();
+    const artistB = (songB.primaryArtists || '').toLowerCase().split(',')[0].trim();
+    if (artistA && artistB && artistA === artistB) {
       return true;
     }
   }
@@ -440,9 +480,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     let newIndex: number;
 
     if (queueSongs && queueSongs.length > 0) {
-      newQueue = dedupeQueueItems(queueSongs.map(toQueueItem));
-      newIndex = queueSongs.findIndex(s => s.id === song.id);
-      if (newIndex === -1) newIndex = 0;
+      // If from search, we only take the first 5 results to keep the queue clean,
+      // the suggestion logic below will fill it with variety.
+      const isFromSearch = state.currentView === 'search';
+      const sourceList = isFromSearch ? queueSongs.slice(0, 8) : queueSongs;
+
+      newQueue = dedupeQueueItems(sourceList.map(toQueueItem));
       newIndex = newQueue.findIndex((item) => item.id === song.id);
       if (newIndex === -1) newIndex = 0;
     } else {
