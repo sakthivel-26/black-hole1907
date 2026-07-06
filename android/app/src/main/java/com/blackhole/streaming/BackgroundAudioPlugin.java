@@ -33,13 +33,12 @@ public class BackgroundAudioPlugin extends Plugin {
         boolean isPlaying = call.getBoolean("isPlaying", false);
 
         try {
-            Intent serviceIntent = new Intent(getContext(), BackgroundAudioService.class);
-            serviceIntent.setAction("UPDATE_METADATA");
-            serviceIntent.putExtra("title", title);
-            serviceIntent.putExtra("artist", artist);
-            serviceIntent.putExtra("image", imageUrl);
-            serviceIntent.putExtra("isPlaying", isPlaying);
-            getContext().startService(serviceIntent);
+            Intent intent = new Intent("UPDATE_METADATA");
+            intent.putExtra("title", title);
+            intent.putExtra("artist", artist);
+            intent.putExtra("image", imageUrl);
+            intent.putExtra("isPlaying", isPlaying);
+            getContext().sendBroadcast(intent);
             call.resolve();
         } catch (Exception e) {
             call.reject("Failed to update notification metadata", e);

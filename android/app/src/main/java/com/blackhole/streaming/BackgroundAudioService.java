@@ -5,8 +5,10 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.session.MediaSession;
@@ -33,46 +35,9 @@ public class BackgroundAudioService extends Service {
     private boolean currentIsPlaying = false;
     private Bitmap currentAlbumArt = null;
 
-    @Override
-    public void onCreate() {
-        super.onCreate();
-        createNotificationChannel();
-
-        // 1. Acquire WakeLock to keep CPU active for background WebView
-        try {
-            PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
-            if (powerManager != null) {
-                wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BlackHole::AudioWakeLock");
-                wakeLock.acquire();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        // 2. Initialize native MediaSession so the OS recognises active media
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            try {
-                mediaSession = new MediaSession(this, "BlackHoleMediaSession");
-                mediaSession.setActive(true);
-                updatePlaybackState(currentIsPlaying);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-    }
-
-    private void updatePlaybackState(boolean isPlaying) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && mediaSession != null) {
-            PlaybackState.Builder stateBuilder = new PlaybackState.Builder()
-                    .setState(isPlaying ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f)
-                    .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS);
-            mediaSession.setPlaybackState(stateBuilder.build());
-        }
-    }
-
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null) {
+    private final BroadcastReceiver receiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
             if (action != null) {
                 if ("ACTION_PLAY".equals(action)) {
@@ -110,10 +75,63 @@ public class BackgroundAudioService extends Service {
                 }
             }
         }
+    };
 
-        // Start the service in the foreground immediately
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        createNotificationChannel();
+
+        // 1. Acquire WakeLock to keep CPU active for background WebView
+        try {
+            PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (powerManager != null) {
+                wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BlackHole::AudioWakeLock");
+                wakeLock.acquire();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        // 2. Initialize native MediaSession so the OS recognises active media
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try {
+                mediaSession = new MediaSession(this, "BlackHoleMediaSession");
+                mediaSession.setActive(true);
+                updatePlaybackState(currentIsPlaying);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        // 3. Register broadcast receiver for notification button clicks & metadata updates
+        IntentFilter filter = new IntentFilter();
+        filter.addAction("ACTION_PLAY");
+        filter.addAction("ACTION_PAUSE");
+        filter.addAction("ACTION_NEXT");
+        filter.addAction("ACTION_PREVIOUS");
+        filter.addAction("UPDATE_METADATA");
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(receiver, filter);
+        }
+    }
+
+    private void updatePlaybackState(boolean isPlaying) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && mediaSession != null) {
+            PlaybackState.Builder stateBuilder = new PlaybackState.Builder()
+                    .setState(isPlaying ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f)
+                    .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS);
+            mediaSession.setPlaybackState(stateBuilder.build());
+        }
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        // Build and display the initial notification immediately to start the foreground service
         updateNotification();
-
         return START_STICKY;
     }
 
@@ -128,14 +146,14 @@ public class BackgroundAudioService extends Service {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0
         );
 
-        Intent prevIntent = new Intent(this, BackgroundAudioService.class).setAction("ACTION_PREVIOUS");
-        PendingIntent prevPendingIntent = PendingIntent.getService(this, 1, prevIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
+        Intent prevIntent = new Intent("ACTION_PREVIOUS");
+        PendingIntent prevPendingIntent = PendingIntent.getBroadcast(this, 1, prevIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
 
-        Intent playPauseIntent = new Intent(this, BackgroundAudioService.class).setAction(currentIsPlaying ? "ACTION_PAUSE" : "ACTION_PLAY");
-        PendingIntent playPausePendingIntent = PendingIntent.getService(this, 2, playPauseIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
+        Intent playPauseIntent = new Intent(currentIsPlaying ? "ACTION_PAUSE" : "ACTION_PLAY");
+        PendingIntent playPausePendingIntent = PendingIntent.getBroadcast(this, 2, playPauseIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
 
-        Intent nextIntent = new Intent(this, BackgroundAudioService.class).setAction("ACTION_NEXT");
-        PendingIntent nextPendingIntent = PendingIntent.getService(this, 3, nextIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
+        Intent nextIntent = new Intent("ACTION_NEXT");
+        PendingIntent nextPendingIntent = PendingIntent.getBroadcast(this, 3, nextIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
 
         Notification.Builder builder;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -216,6 +234,13 @@ public class BackgroundAudioService extends Service {
 
     @Override
     public void onDestroy() {
+        // Unregister broadcast receiver
+        try {
+            unregisterReceiver(receiver);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
         // Release WakeLock
         try {
             if (wakeLock != null && wakeLock.isHeld()) {
