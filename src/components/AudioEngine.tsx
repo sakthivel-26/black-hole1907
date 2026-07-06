@@ -516,7 +516,7 @@ export default function AudioEngine() {
   }, [currentSong?.id]);
 
   useEffect(() => {
-    const isYt = currentSong?.id.startsWith('yt_');
+    const isYt = !!currentSong?.id?.startsWith('yt_');
     if (isYt) {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === 'function') {
         try {
@@ -542,7 +542,7 @@ export default function AudioEngine() {
   }, [isPlaying, currentSong?.id]);
 
   useEffect(() => {
-    const isYt = currentSong?.id.startsWith('yt_');
+    const isYt = !!currentSong?.id?.startsWith('yt_');
     if (isYt) {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.setVolume === 'function') {
         try {
@@ -557,7 +557,7 @@ export default function AudioEngine() {
   }, [isMuted, volume, currentSong?.id]);
 
   useEffect(() => {
-    const isYt = currentSong?.id.startsWith('yt_');
+    const isYt = !!currentSong?.id?.startsWith('yt_');
     if (isYt) {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
         try {
@@ -596,7 +596,7 @@ export default function AudioEngine() {
 
     const syncActions = () => {
       navigator.mediaSession.setActionHandler('play', () => {
-        const isYt = usePlayerStore.getState().currentSong?.id.startsWith('yt_');
+        const isYt = !!usePlayerStore.getState().currentSong?.id?.startsWith('yt_');
         if (isYt) {
           if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === 'function') {
             try { ytPlayerRef.current.playVideo(); } catch {}
@@ -610,7 +610,7 @@ export default function AudioEngine() {
         usePlayerStore.setState({ isPlaying: true });
       });
       navigator.mediaSession.setActionHandler('pause', () => {
-        const isYt = usePlayerStore.getState().currentSong?.id.startsWith('yt_');
+        const isYt = !!usePlayerStore.getState().currentSong?.id?.startsWith('yt_');
         if (isYt) {
           if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
             try { ytPlayerRef.current.pauseVideo(); } catch {}
@@ -623,35 +623,6 @@ export default function AudioEngine() {
         }
         usePlayerStore.setState({ isPlaying: false });
       });
-      navigator.mediaSession.setActionHandler('playpause', () => {
-        const state = usePlayerStore.getState();
-        const nextPlaying = !state.isPlaying;
-        const isYt = state.currentSong?.id.startsWith('yt_');
-        if (nextPlaying) {
-          if (isYt) {
-            if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === 'function') {
-              try { ytPlayerRef.current.playVideo(); } catch {}
-            }
-          } else {
-            const audio = audioRef.current;
-            if (audio) {
-              audio.play().catch(() => {});
-            }
-          }
-        } else {
-          if (isYt) {
-            if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
-              try { ytPlayerRef.current.pauseVideo(); } catch {}
-            }
-          } else {
-            const audio = audioRef.current;
-            if (audio) {
-              audio.pause();
-            }
-          }
-        }
-        usePlayerStore.setState({ isPlaying: nextPlaying });
-      });
       navigator.mediaSession.setActionHandler('previoustrack', () => {
         usePlayerStore.getState().prevSong();
       });
@@ -659,7 +630,7 @@ export default function AudioEngine() {
         usePlayerStore.getState().nextSong();
       });
       navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-        const isYt = usePlayerStore.getState().currentSong?.id.startsWith('yt_');
+        const isYt = !!usePlayerStore.getState().currentSong?.id?.startsWith('yt_');
         const skip = details.seekOffset || 10;
         if (isYt) {
           if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
@@ -675,7 +646,7 @@ export default function AudioEngine() {
         }
       });
       navigator.mediaSession.setActionHandler('seekforward', (details) => {
-        const isYt = usePlayerStore.getState().currentSong?.id.startsWith('yt_');
+        const isYt = !!usePlayerStore.getState().currentSong?.id?.startsWith('yt_');
         const skip = details.seekOffset || 10;
         if (isYt) {
           if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
@@ -692,7 +663,7 @@ export default function AudioEngine() {
         }
       });
       navigator.mediaSession.setActionHandler('seekto', (details) => {
-        const isYt = usePlayerStore.getState().currentSong?.id.startsWith('yt_');
+        const isYt = !!usePlayerStore.getState().currentSong?.id?.startsWith('yt_');
         if (details.seekTime == null) return;
         if (isYt) {
           if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
@@ -716,7 +687,7 @@ export default function AudioEngine() {
   }, []);
 
   useEffect(() => {
-    const isYt = currentSong?.id.startsWith('yt_');
+    const isYt = !!currentSong?.id?.startsWith('yt_');
     if (isYt) {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.getDuration === 'function') {
         try {
