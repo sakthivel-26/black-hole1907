@@ -722,6 +722,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const downloaded = get().downloadedSongs.filter(s => s.id !== songId);
     set({ downloadedSongs: downloaded });
     saveToStorage('downloadedSongs', downloaded);
+    
+    // Clean up offline database storage for the deleted track
+    try {
+      import('idb-keyval').then(({ del: idbDel }) => {
+        void idbDel(`song_file_${songId}`);
+      });
+    } catch {}
   },
   isDownloaded: (id) => get().downloadedSongs.some(s => s.id === id),
 

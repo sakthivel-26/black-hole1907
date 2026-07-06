@@ -729,8 +729,19 @@ export async function downloadSongFile(song: Song): Promise<{ quality: string; f
   }
 
   const blob = await response.blob();
+
+  // Store the audio binary in IndexedDB for local offline playback
+  try {
+    const { set: idbSet } = await import('idb-keyval');
+    await idbSet(`song_file_${song.id}`, blob);
+  } catch (err) {
+    console.warn('Failed to save song to offline database:', err);
+  }
+
   const extension = blob.type.includes('mp4') || blob.type.includes('aac') ? 'm4a' : 'mp3';
   const fileName = sanitizeFileName(`${song.name} - ${song.primaryArtists} [${quality}].${extension}`);
+  
+  // Trigger file download (works natively on browsers)
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = objectUrl;

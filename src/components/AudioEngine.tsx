@@ -55,6 +55,7 @@ export default function AudioEngine() {
   const ytTimeIntervalRef = useRef<any>(null);
   const ytInitPromiseRef = useRef<Promise<any> | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const localAudioUrlRef = useRef<string | null>(null);
   
   const isSwitchingSourceRef = useRef(false);
   const repeatRef = useRef(usePlayerStore.getState().repeat);
@@ -401,6 +402,10 @@ export default function AudioEngine() {
       audio.removeEventListener('error', onError);
       audio.pause();
       audio.src = '';
+      if (localAudioUrlRef.current) {
+        URL.revokeObjectURL(localAudioUrlRef.current);
+        localAudioUrlRef.current = null;
+      }
       stopYtPolling();
     };
   }, []);
@@ -456,8 +461,30 @@ export default function AudioEngine() {
         }
         stopYtPolling();
 
-        let url = getDownloadUrl(currentSong.downloadUrl);
-        if (!url) {
+        let url = '';
+        let isLocal = false;
+
+        try {
+          const { get: idbGet } = await import('idb-keyval');
+          const localBlob = await idbGet<Blob>(`song_file_${currentSong.id}`);
+          if (localBlob) {
+            // Clean up old object URL to prevent memory leaks
+            if (localAudioUrlRef.current) {
+              try { URL.revokeObjectURL(localAudioUrlRef.current); } catch {}
+            }
+            url = URL.createObjectURL(localBlob);
+            localAudioUrlRef.current = url;
+            isLocal = true;
+          }
+        } catch (e) {
+          console.warn('Failed to retrieve offline song binary:', e);
+        }
+
+        if (!isLocal) {
+          url = getDownloadUrl(currentSong.downloadUrl);
+        }
+
+        if (!url && !isLocal) {
           console.log(`No download URL for ${currentSong.name}. Searching YouTube...`);
           try {
             const ytSongs = await searchYouTubeSongs(`${currentSong.name} ${currentSong.primaryArtists}`, currentSong.name, currentSong.primaryArtists);
@@ -485,7 +512,7 @@ export default function AudioEngine() {
           }
         }
 
-        if (!url) {
+        if (!url && !isLocal) {
           setIsLoading(false);
           setIsPlaying(false);
           toast.error('Playback failed. Streaming source unavailable.');
