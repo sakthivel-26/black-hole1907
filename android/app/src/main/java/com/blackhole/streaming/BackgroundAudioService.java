@@ -31,9 +31,6 @@ public class BackgroundAudioService extends Service {
     private static final int NOTIFICATION_ID = 1012;
     private MediaSession mediaSession;
     private PowerManager.WakeLock wakeLock;
-    private AudioManager audioManager;
-    private AudioManager.OnAudioFocusChangeListener focusChangeListener;
-    private AudioFocusRequest focusRequest;
 
     private String currentTitle = "Black Hole";
     private String currentArtist = "Playing audio in background";
@@ -99,40 +96,6 @@ public class BackgroundAudioService extends Service {
             e.printStackTrace();
         }
 
-        // 2. Request Audio Focus to prevent system from throttling audio threads
-        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        focusChangeListener = new AudioManager.OnAudioFocusChangeListener() {
-            @Override
-            public void onAudioFocusChange(int focusChange) {
-                if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
-                    BackgroundAudioPlugin.handleNotificationAction("pause");
-                    currentIsPlaying = false;
-                    updatePlaybackState(false);
-                    updateNotification();
-                }
-            }
-        };
-
-        if (audioManager != null) {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    AudioAttributes playbackAttributes = new AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                            .build();
-                    focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                            .setAudioAttributes(playbackAttributes)
-                            .setAcceptsDelayedFocusGain(true)
-                            .setOnAudioFocusChangeListener(focusChangeListener)
-                            .build();
-                    audioManager.requestAudioFocus(focusRequest);
-                } else {
-                    audioManager.requestAudioFocus(focusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
 
         // 3. Initialize native MediaSession so the OS recognises active media
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -307,18 +270,6 @@ public class BackgroundAudioService extends Service {
             e.printStackTrace();
         }
 
-        // Release Audio Focus
-        if (audioManager != null) {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && focusRequest != null) {
-                    audioManager.abandonAudioFocusRequest(focusRequest);
-                } else if (focusChangeListener != null) {
-                    audioManager.abandonAudioFocus(focusChangeListener);
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
 
         // Release MediaSession
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && mediaSession != null) {
