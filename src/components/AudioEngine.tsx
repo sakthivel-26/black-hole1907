@@ -623,6 +623,35 @@ export default function AudioEngine() {
         }
         usePlayerStore.setState({ isPlaying: false });
       });
+      navigator.mediaSession.setActionHandler('playpause', () => {
+        const state = usePlayerStore.getState();
+        const nextPlaying = !state.isPlaying;
+        const isYt = state.currentSong?.id.startsWith('yt_');
+        if (nextPlaying) {
+          if (isYt) {
+            if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === 'function') {
+              try { ytPlayerRef.current.playVideo(); } catch {}
+            }
+          } else {
+            const audio = audioRef.current;
+            if (audio) {
+              audio.play().catch(() => {});
+            }
+          }
+        } else {
+          if (isYt) {
+            if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
+              try { ytPlayerRef.current.pauseVideo(); } catch {}
+            }
+          } else {
+            const audio = audioRef.current;
+            if (audio) {
+              audio.pause();
+            }
+          }
+        }
+        usePlayerStore.setState({ isPlaying: nextPlaying });
+      });
       navigator.mediaSession.setActionHandler('previoustrack', () => {
         usePlayerStore.getState().prevSong();
       });
