@@ -1,12 +1,10 @@
 package com.blackhole.streaming;
 
 import android.Manifest;
-import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.PowerManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import androidx.core.app.ActivityCompat;
@@ -14,7 +12,6 @@ import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
-    private PowerManager.WakeLock wakeLock;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -42,19 +39,9 @@ public class MainActivity extends BridgeActivity {
                 settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
             }
         }
+    }
 
-        // Acquire WakeLock to keep CPU active for background playback
-        try {
-            PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
-            if (powerManager != null) {
-                wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BlackHole::AudioPlayback");
-                wakeLock.acquire();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        // Start Foreground Service to keep background thread alive
+    private void startBackgroundService() {
         try {
             Intent serviceIntent = new Intent(this, BackgroundAudioService.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -67,9 +54,21 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    private void stopBackgroundService() {
+        try {
+            Intent serviceIntent = new Intent(this, BackgroundAudioService.class);
+            stopService(serviceIntent);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     @Override
     public void onResume() {
         super.onResume();
+        // Stop service when app returns to foreground to clean up notification
+        stopBackgroundService();
+
         if (this.getBridge() != null && this.getBridge().getWebView() != null) {
             this.getBridge().getWebView().onResume();
             this.getBridge().getWebView().resumeTimers();
@@ -79,6 +78,9 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onPause() {
         super.onPause(); 
+        // Start background service only when app goes to background
+        startBackgroundService();
+
         // Synchronously keep the WebView active to prevent audio freeze
         if (this.getBridge() != null && this.getBridge().getWebView() != null) {
             this.getBridge().getWebView().onResume();
@@ -89,6 +91,9 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onStop() {
         super.onStop();
+        // Ensure background service is running when fully stopped in background
+        startBackgroundService();
+
         // Also keep WebView active when fully stopped in background
         if (this.getBridge() != null && this.getBridge().getWebView() != null) {
             this.getBridge().getWebView().onResume();
@@ -98,23 +103,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onDestroy() {
-        // Release WakeLock when the app is completely destroyed
-        try {
-            if (wakeLock != null && wakeLock.isHeld()) {
-                wakeLock.release();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        
-        // Stop foreground service
-        try {
-            Intent serviceIntent = new Intent(this, BackgroundAudioService.class);
-            stopService(serviceIntent);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        
+        stopBackgroundService();
         super.onDestroy();
     }
 }
