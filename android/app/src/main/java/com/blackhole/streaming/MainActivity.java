@@ -26,6 +26,21 @@ public class MainActivity extends BridgeActivity {
             }
         }
 
+        // Request battery optimization exemption to prevent background WebView throttling
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(android.content.Context.POWER_SERVICE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && pm != null) {
+                if (!pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                    Intent intent = new Intent();
+                    intent.setAction(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    intent.setData(android.net.Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
         // Configure WebView settings for better background performance
         if (this.getBridge() != null && this.getBridge().getWebView() != null) {
             WebView webView = this.getBridge().getWebView();

@@ -11,6 +11,9 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
+import android.media.AudioManager;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.os.Build;
@@ -28,6 +31,9 @@ public class BackgroundAudioService extends Service {
     private static final int NOTIFICATION_ID = 1012;
     private MediaSession mediaSession;
     private PowerManager.WakeLock wakeLock;
+    private AudioManager audioManager;
+    private AudioManager.OnAudioFocusChangeListener focusChangeListener;
+    private AudioFocusRequest focusRequest;
 
     private String currentTitle = "Black Hole";
     private String currentArtist = "Playing audio in background";
@@ -93,7 +99,42 @@ public class BackgroundAudioService extends Service {
             e.printStackTrace();
         }
 
-        // 2. Initialize native MediaSession so the OS recognises active media
+        // 2. Request Audio Focus to prevent system from throttling audio threads
+        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        focusChangeListener = new AudioManager.OnAudioFocusChangeListener() {
+            @Override
+            public void onAudioFocusChange(int focusChange) {
+                if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
+                    BackgroundAudioPlugin.handleNotificationAction("pause");
+                    currentIsPlaying = false;
+                    updatePlaybackState(false);
+                    updateNotification();
+                }
+            }
+        };
+
+        if (audioManager != null) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    AudioAttributes playbackAttributes = new AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                            .build();
+                    focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                            .setAudioAttributes(playbackAttributes)
+                            .setAcceptsDelayedFocusGain(true)
+                            .setOnAudioFocusChangeListener(focusChangeListener)
+                            .build();
+                    audioManager.requestAudioFocus(focusRequest);
+                } else {
+                    audioManager.requestAudioFocus(focusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        // 3. Initialize native MediaSession so the OS recognises active media
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             try {
                 mediaSession = new MediaSession(this, "BlackHoleMediaSession");
@@ -104,7 +145,7 @@ public class BackgroundAudioService extends Service {
             }
         }
 
-        // 3. Register broadcast receiver for notification button clicks & metadata updates
+        // 4. Register broadcast receiver for notification button clicks & metadata updates
         IntentFilter filter = new IntentFilter();
         filter.addAction("ACTION_PLAY");
         filter.addAction("ACTION_PAUSE");
@@ -130,7 +171,6 @@ public class BackgroundAudioService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // Build and display the initial notification immediately to start the foreground service
         updateNotification();
         return START_STICKY;
     }
@@ -147,12 +187,15 @@ public class BackgroundAudioService extends Service {
         );
 
         Intent prevIntent = new Intent("ACTION_PREVIOUS");
+        prevIntent.setPackage(getPackageName());
         PendingIntent prevPendingIntent = PendingIntent.getBroadcast(this, 1, prevIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
 
         Intent playPauseIntent = new Intent(currentIsPlaying ? "ACTION_PAUSE" : "ACTION_PLAY");
+        playPauseIntent.setPackage(getPackageName());
         PendingIntent playPausePendingIntent = PendingIntent.getBroadcast(this, 2, playPauseIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
 
         Intent nextIntent = new Intent("ACTION_NEXT");
+        nextIntent.setPackage(getPackageName());
         PendingIntent nextPendingIntent = PendingIntent.getBroadcast(this, 3, nextIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
 
         Notification.Builder builder;
@@ -173,7 +216,7 @@ public class BackgroundAudioService extends Service {
             builder.setLargeIcon(currentAlbumArt);
         }
 
-        // Add media action controls (indices 0, 1, 2)
+        // Add media action controls
         builder.addAction(new Notification.Action.Builder(
                 android.R.drawable.ic_media_previous, "Previous", prevPendingIntent).build());
         builder.addAction(new Notification.Action.Builder(
@@ -205,7 +248,6 @@ public class BackgroundAudioService extends Service {
             @Override
             public void run() {
                 try {
-                    // Prepend https: to protocol-relative URLs
                     String fullUrl = urlStr;
                     if (fullUrl.startsWith("//")) {
                         fullUrl = "https:" + fullUrl;
@@ -227,6 +269,12 @@ public class BackgroundAudioService extends Service {
                     });
                 } catch (Exception e) {
                     e.printStackTrace();
+                    new Handler(Looper.getMainLooper()).post(new Runnable() {
+                        @Override
+                        public void run() {
+                            updateNotification();
+                        }
+                    });
                 }
             }
         }).start();
@@ -248,6 +296,19 @@ public class BackgroundAudioService extends Service {
             }
         } catch (Exception e) {
             e.printStackTrace();
+        }
+
+        // Release Audio Focus
+        if (audioManager != null) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && focusRequest != null) {
+                    audioManager.abandonAudioFocusRequest(focusRequest);
+                } else if (focusChangeListener != null) {
+                    audioManager.abandonAudioFocus(focusChangeListener);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
 
         // Release MediaSession

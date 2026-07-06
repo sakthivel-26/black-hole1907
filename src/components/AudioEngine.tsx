@@ -779,13 +779,14 @@ export default function AudioEngine() {
       ref={wrapperRef}
       style={{
         position: 'fixed',
-        left: '-9999px',
-        top: '-9999px',
-        width: '200px',
-        height: '200px',
+        right: '1px',
+        bottom: '1px',
+        width: '2px',
+        height: '2px',
         overflow: 'hidden',
         pointerEvents: 'none',
-        opacity: 0,
+        opacity: 0.01,
+        zIndex: -1000,
       }}
     >
       <div id="yt-player-container" />
