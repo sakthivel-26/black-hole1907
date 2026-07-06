@@ -5,9 +5,12 @@ import toast from 'react-hot-toast';
 import { usePlayerStore } from '../store/usePlayerStore';
 import type { Song } from '../types';
 import { prefetchLyrics } from '../services/lyricsService';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+
+const BackgroundAudio = registerPlugin<any>('BackgroundAudio');
 
 function updateMediaSessionCustom(song: Song | null, currentTime: number, duration: number, isPlaying: boolean) {
-  if (!song || !('mediaSession' in navigator)) return;
+  if (!song) return;
 
   const state = usePlayerStore.getState();
   const repeatMode = state.repeat;
@@ -16,6 +19,23 @@ function updateMediaSessionCustom(song: Song | null, currentTime: number, durati
   const repeatText = repeatMode === 'one' ? ' (🔁 Repeat One)' : repeatMode === 'all' ? ' (🔁 Repeat All)' : '';
   const shuffleText = isShuffle ? ' (🔀 Shuffle On)' : '';
   const metadataArtist = `${song.primaryArtists}${repeatText}${shuffleText}`;
+
+  // Call the native background audio plugin to sync lock screen notification
+  if (Capacitor.isNativePlatform()) {
+    let image = '';
+    if (song.image && song.image.length > 0) {
+      const found = song.image.find(i => i.quality === '500x500') || song.image[0];
+      image = found.url || '';
+    }
+    BackgroundAudio.updateMetadata({
+      title: song.name,
+      artist: metadataArtist,
+      image: image,
+      isPlaying: isPlaying
+    }).catch((e: any) => console.warn('Native updateMetadata failed:', e));
+  }
+
+  if (!('mediaSession' in navigator)) return;
 
   navigator.mediaSession.metadata = new MediaMetadata({
     title: song.name,
@@ -407,6 +427,27 @@ export default function AudioEngine() {
         localAudioUrlRef.current = null;
       }
       stopYtPolling();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const listenerPromise = BackgroundAudio.addListener('notificationAction', (data: any) => {
+      const store = usePlayerStore.getState();
+      if (data.action === 'play') {
+        store.setIsPlaying(true);
+      } else if (data.action === 'pause') {
+        store.setIsPlaying(false);
+      } else if (data.action === 'next') {
+        void store.nextSong();
+      } else if (data.action === 'prev') {
+        store.prevSong();
+      }
+    });
+
+    return () => {
+      void listenerPromise.then((l: any) => l.remove());
     };
   }, []);
 

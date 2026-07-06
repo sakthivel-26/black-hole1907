@@ -7,17 +7,31 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
+
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 public class BackgroundAudioService extends Service {
     private static final String CHANNEL_ID = "BackgroundAudioChannel";
     private static final int NOTIFICATION_ID = 1012;
     private MediaSession mediaSession;
     private PowerManager.WakeLock wakeLock;
+
+    private String currentTitle = "Black Hole";
+    private String currentArtist = "Playing audio in background";
+    private String currentImageUrl = "";
+    private boolean currentIsPlaying = false;
+    private Bitmap currentAlbumArt = null;
 
     @Override
     public void onCreate() {
@@ -40,20 +54,70 @@ public class BackgroundAudioService extends Service {
             try {
                 mediaSession = new MediaSession(this, "BlackHoleMediaSession");
                 mediaSession.setActive(true);
-                
-                PlaybackState state = new PlaybackState.Builder()
-                        .setState(PlaybackState.STATE_PLAYING, 0, 1.0f)
-                        .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE)
-                        .build();
-                mediaSession.setPlaybackState(state);
+                updatePlaybackState(currentIsPlaying);
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
     }
 
+    private void updatePlaybackState(boolean isPlaying) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && mediaSession != null) {
+            PlaybackState.Builder stateBuilder = new PlaybackState.Builder()
+                    .setState(isPlaying ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f)
+                    .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS);
+            mediaSession.setPlaybackState(stateBuilder.build());
+        }
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null) {
+            String action = intent.getAction();
+            if (action != null) {
+                if ("ACTION_PLAY".equals(action)) {
+                    BackgroundAudioPlugin.handleNotificationAction("play");
+                    currentIsPlaying = true;
+                    updatePlaybackState(true);
+                    updateNotification();
+                } else if ("ACTION_PAUSE".equals(action)) {
+                    BackgroundAudioPlugin.handleNotificationAction("pause");
+                    currentIsPlaying = false;
+                    updatePlaybackState(false);
+                    updateNotification();
+                } else if ("ACTION_NEXT".equals(action)) {
+                    BackgroundAudioPlugin.handleNotificationAction("next");
+                } else if ("ACTION_PREVIOUS".equals(action)) {
+                    BackgroundAudioPlugin.handleNotificationAction("prev");
+                } else if ("UPDATE_METADATA".equals(action)) {
+                    String title = intent.getStringExtra("title");
+                    String artist = intent.getStringExtra("artist");
+                    String imageUrl = intent.getStringExtra("image");
+                    boolean isPlaying = intent.getBooleanExtra("isPlaying", false);
+
+                    if (title != null) currentTitle = title;
+                    if (artist != null) currentArtist = artist;
+                    currentIsPlaying = isPlaying;
+                    updatePlaybackState(isPlaying);
+
+                    if (imageUrl != null && !imageUrl.equals(currentImageUrl)) {
+                        currentImageUrl = imageUrl;
+                        currentAlbumArt = null;
+                        downloadBitmap(imageUrl);
+                    } else {
+                        updateNotification();
+                    }
+                }
+            }
+        }
+
+        // Start the service in the foreground immediately
+        updateNotification();
+
+        return START_STICKY;
+    }
+
+    private void updateNotification() {
         Intent notificationIntent = new Intent(this, MainActivity.class);
         notificationIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         
@@ -64,6 +128,15 @@ public class BackgroundAudioService extends Service {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0
         );
 
+        Intent prevIntent = new Intent(this, BackgroundAudioService.class).setAction("ACTION_PREVIOUS");
+        PendingIntent prevPendingIntent = PendingIntent.getService(this, 1, prevIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
+
+        Intent playPauseIntent = new Intent(this, BackgroundAudioService.class).setAction(currentIsPlaying ? "ACTION_PAUSE" : "ACTION_PLAY");
+        PendingIntent playPausePendingIntent = PendingIntent.getService(this, 2, playPauseIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
+
+        Intent nextIntent = new Intent(this, BackgroundAudioService.class).setAction("ACTION_NEXT");
+        PendingIntent nextPendingIntent = PendingIntent.getService(this, 3, nextIntent, PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
+
         Notification.Builder builder;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             builder = new Notification.Builder(this, CHANNEL_ID);
@@ -71,16 +144,31 @@ public class BackgroundAudioService extends Service {
             builder = new Notification.Builder(this);
         }
 
-        builder.setContentTitle("Black Hole")
-                .setContentText("Playing audio in background")
+        builder.setContentTitle(currentTitle)
+                .setContentText(currentArtist)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setAutoCancel(false);
 
-        // Apply MediaStyle decoration to the notification using the native MediaSession token
+        if (currentAlbumArt != null) {
+            builder.setLargeIcon(currentAlbumArt);
+        }
+
+        // Add media action controls (indices 0, 1, 2)
+        builder.addAction(new Notification.Action.Builder(
+                android.R.drawable.ic_media_previous, "Previous", prevPendingIntent).build());
+        builder.addAction(new Notification.Action.Builder(
+                currentIsPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play, 
+                currentIsPlaying ? "Pause" : "Play", playPausePendingIntent).build());
+        builder.addAction(new Notification.Action.Builder(
+                android.R.drawable.ic_media_next, "Next", nextPendingIntent).build());
+
+        // Apply MediaStyle decoration
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && mediaSession != null) {
             builder.setStyle(new Notification.MediaStyle()
-                    .setMediaSession((MediaSession.Token) mediaSession.getSessionToken()));
+                    .setMediaSession((MediaSession.Token) mediaSession.getSessionToken())
+                    .setShowActionsInCompactView(0, 1, 2));
         }
 
         Notification notification = builder.build();
@@ -90,8 +178,40 @@ public class BackgroundAudioService extends Service {
         } else {
             startForeground(NOTIFICATION_ID, notification);
         }
+    }
 
-        return START_STICKY;
+    private void downloadBitmap(final String urlStr) {
+        if (urlStr == null || urlStr.isEmpty()) return;
+        
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // Prepend https: to protocol-relative URLs
+                    String fullUrl = urlStr;
+                    if (fullUrl.startsWith("//")) {
+                        fullUrl = "https:" + fullUrl;
+                    }
+                    
+                    URL url = new URL(fullUrl);
+                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                    connection.setDoInput(true);
+                    connection.connect();
+                    InputStream input = connection.getInputStream();
+                    final Bitmap bitmap = BitmapFactory.decodeStream(input);
+                    
+                    new Handler(Looper.getMainLooper()).post(new Runnable() {
+                        @Override
+                        public void run() {
+                            currentAlbumArt = bitmap;
+                            updateNotification();
+                        }
+                    });
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
     }
 
     @Override
