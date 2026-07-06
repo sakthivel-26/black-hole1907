@@ -81,9 +81,6 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
-        // Stop service when app returns to foreground to clean up notification
-        stopBackgroundService();
-
         if (this.getBridge() != null && this.getBridge().getWebView() != null) {
             this.getBridge().getWebView().onResume();
             this.getBridge().getWebView().resumeTimers();
@@ -93,10 +90,6 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onPause() {
         super.onPause(); 
-        // Start background service only when app goes to background
-        startBackgroundService();
-
-        // Synchronously keep the WebView active to prevent audio freeze
         if (this.getBridge() != null && this.getBridge().getWebView() != null) {
             this.getBridge().getWebView().onResume();
             this.getBridge().getWebView().resumeTimers();
@@ -106,10 +99,6 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onStop() {
         super.onStop();
-        // Ensure background service is running when fully stopped in background
-        startBackgroundService();
-
-        // Also keep WebView active when fully stopped in background
         if (this.getBridge() != null && this.getBridge().getWebView() != null) {
             this.getBridge().getWebView().onResume();
             this.getBridge().getWebView().resumeTimers();

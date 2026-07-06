@@ -1,6 +1,7 @@
 package com.blackhole.streaming;
 
 import android.content.Intent;
+import android.os.Build;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -33,7 +34,16 @@ public class BackgroundAudioPlugin extends Plugin {
         boolean isPlaying = call.getBoolean("isPlaying", false);
 
         try {
+            // Start the service if not running (permitted since app is in the foreground during click/load)
+            Intent serviceIntent = new Intent(getContext(), BackgroundAudioService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getContext().startForegroundService(serviceIntent);
+            } else {
+                getContext().startService(serviceIntent);
+            }
+
             Intent intent = new Intent("UPDATE_METADATA");
+            intent.setPackage(getContext().getPackageName());
             intent.putExtra("title", title);
             intent.putExtra("artist", artist);
             intent.putExtra("image", imageUrl);
