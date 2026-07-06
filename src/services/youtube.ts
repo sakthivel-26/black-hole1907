@@ -167,6 +167,27 @@ export async function searchYouTubeSongs(
         const uploader = vr.ownerText?.runs?.[0]?.text || vr.shortBylineText?.runs?.[0]?.text || '';
         const durationText = vr.lengthText?.simpleText || '';
         const duration = parseDuration(durationText);
+
+        // 1. Strict duration constraint: skip videos under 45s (teasers/shorts) or over 8 minutes (compilations/movies)
+        if (duration > 0 && (duration < 45 || duration > 480)) {
+          continue;
+        }
+
+        // 2. Strict keyword constraints: filter out non-songs (vlogs, reviews, climax scenes, reactions, etc.)
+        const titleLower = title.toLowerCase();
+        const uploaderLower = uploader.toLowerCase();
+        const nonSongKeywords = [
+          'full movie', 'interview', 'review', 'reaction', 'trailer', 'teaser', 
+          'promo', 'vlog', 'climax scene', 'fight scene', 'comedy scene', 'scene', 
+          'episode', 'serial', 'public review', 'theater response', 'theatre response', 
+          'fdfs', 'behind the scenes', 'bts', 'making of', 'unboxing', 'tutorial', 
+          'how to', 'reacting to', 'movie review', 'audio launch event', 'press meet'
+        ];
+
+        if (nonSongKeywords.some(keyword => titleLower.includes(keyword) || uploaderLower.includes(keyword))) {
+          continue;
+        }
+
         const thumbnail = vr.thumbnail?.thumbnails?.[0]?.url || '';
 
         const score = scoreYouTubeResult({ title, uploader }, querySongName, queryArtistsList);

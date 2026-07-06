@@ -232,28 +232,39 @@ const isDuplicateTrack = (songA: Song, songB: Song): boolean => {
     }
   }
 
-  const phoneCoreA = normalizePhonetic(getCoreTitle(songA.name));
-  const phoneCoreB = normalizePhonetic(getCoreTitle(songB.name));
+  const coreA = getCoreTitle(songA.name);
+  const coreB = getCoreTitle(songB.name);
 
-  if (phoneCoreA && phoneCoreB) {
-    if (phoneCoreA === phoneCoreB) return true;
-    const minLen = Math.min(phoneCoreA.length, phoneCoreB.length);
-    if (minLen >= 5 && (phoneCoreA.includes(phoneCoreB) || phoneCoreB.includes(phoneCoreA))) {
+  // 1. Exact core title match (specific titles should never repeat)
+  if (coreA && coreB && coreA === coreB) {
+    // If the title is specific (contains a space or is > 7 characters), it's a duplicate
+    // regardless of the uploader/artist name (since different uploaders copy same songs)
+    if (coreA.length > 7 || coreA.includes(' ')) {
+      return true;
+    }
+
+    const artistA = (songA.primaryArtists || '').toLowerCase().split(',')[0].trim();
+    const artistB = (songB.primaryArtists || '').toLowerCase().split(',')[0].trim();
+    if (artistA && artistB && (artistA.includes(artistB) || artistB.includes(artistA))) {
       return true;
     }
   }
 
-  const coreA = getCoreTitle(songA.name);
-  const coreB = getCoreTitle(songB.name);
+  // 2. Phonetic core title match
+  const phoneCoreA = normalizePhonetic(coreA);
+  const phoneCoreB = normalizePhonetic(coreB);
 
-  // If core titles match exactly and they have at least one common artist
-  if (coreA && coreB && coreA === coreB) {
-    const artistA = (songA.primaryArtists || '').toLowerCase().split(',')[0].trim();
-    const artistB = (songB.primaryArtists || '').toLowerCase().split(',')[0].trim();
-    if (artistA === artistB) return true;
+  if (phoneCoreA && phoneCoreB) {
+    if (phoneCoreA === phoneCoreB && phoneCoreA.length > 6) {
+      return true;
+    }
+    const minLen = Math.min(phoneCoreA.length, phoneCoreB.length);
+    if (minLen >= 7 && (phoneCoreA.includes(phoneCoreB) || phoneCoreB.includes(phoneCoreA))) {
+      return true;
+    }
   }
 
-  // Duration + Artist overlap check (highly robust for foreign titles)
+  // 3. Duration + Artist overlap check (highly robust for foreign titles)
   const durationDiff = Math.abs((songA.duration || 0) - (songB.duration || 0));
   if (durationDiff < 15) {
     const artistA = (songA.primaryArtists || '').toLowerCase().split(',')[0].trim();
