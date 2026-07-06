@@ -417,32 +417,79 @@ const isTamilSong = (item: Song | QueueItem): boolean => {
   return sLang.includes('tamil') || isTamilArtist(item);
 };
 
+const getLanguageTag = (song: Song | QueueItem): string | null => {
+  const lang = (song.language || '').toLowerCase().trim();
+  if (lang.includes('tamil')) return 'tamil';
+  if (lang.includes('telugu')) return 'telugu';
+  if (lang.includes('hindi')) return 'hindi';
+  if (lang.includes('english')) return 'english';
+
+  if (isTamilSong(song)) return 'tamil';
+  return null;
+};
+
 const fetchVibeSuggestions = async (song: Song): Promise<Song[]> => {
   try {
+    const targetLang = getLanguageTag(song);
+    
     // 1. Try Last.fm Suggestions (extremely high-quality recommendations database)
     const similarQueries = await getSimilarTracks(song);
     let suggestions: Song[] = [];
     
     if (similarQueries.length > 0) {
-      // Search for the top 5 similar songs on the music API
-      const searchPromises = similarQueries.slice(0, 5).map(query => searchSongs(query, 1, 1));
+      // Search for the top 5 similar songs on the music API, appending language tag if applicable
+      const searchPromises = similarQueries.slice(0, 5).map(query => {
+        const queryWithLang = targetLang && !query.toLowerCase().includes(targetLang) ? `${query} ${targetLang}` : query;
+        return searchSongs(queryWithLang, 1, 1);
+      });
       const searchResults = await Promise.allSettled(searchPromises);
       suggestions = searchResults
         .flatMap(r => r.status === 'fulfilled' ? r.value.results : []);
     }
 
+    // Filter out suggestions that don't match the target language
+    if (targetLang) {
+      suggestions = suggestions.filter(s => {
+        const sLang = getLanguageTag(s);
+        if (sLang !== null && sLang !== targetLang) return false;
+        const nameLower = s.name.toLowerCase();
+        const otherLangs = ['tamil', 'telugu', 'hindi', 'english', 'punjabi', 'kannada', 'malayalam'].filter(l => l !== targetLang);
+        if (otherLangs.some(lang => nameLower.includes(lang))) return false;
+        return true;
+      });
+    }
+
     // 2. Fallback to Saavn Suggestions if Last.fm returned nothing
     if (suggestions.length < 5 && !song.id.startsWith('yt_')) {
       const native = await getSongSuggestions(song.id);
-      suggestions = dedupeQueueItems([...suggestions, ...native].map(toQueueItem));
+      let nativeFiltered = native;
+      if (targetLang) {
+        nativeFiltered = native.filter(s => {
+          const sLang = getLanguageTag(s);
+          if (sLang !== null && sLang !== targetLang) return false;
+          return true;
+        });
+      }
+      suggestions = dedupeQueueItems([...suggestions, ...nativeFiltered].map(toQueueItem));
     }
 
     // 3. Last fallback: YouTube
     if (suggestions.length < 3) {
-      const yt = await getYTSongSuggestions(song);
-      suggestions = dedupeQueueItems([...suggestions, ...yt].map(toQueueItem));
+      const yt = await getYTSongSuggestions(song, targetLang);
+      let ytFiltered = yt;
+      if (targetLang) {
+        ytFiltered = yt.filter(s => {
+          const nameLower = s.name.toLowerCase();
+          const otherLangs = ['tamil', 'telugu', 'hindi', 'english', 'punjabi', 'kannada', 'malayalam'].filter(l => l !== targetLang);
+          if (otherLangs.some(lang => nameLower.includes(lang))) return false;
+          return true;
+        });
+      }
+      suggestions = dedupeQueueItems([...suggestions, ...ytFiltered].map(toQueueItem));
     }
-    return suggestions;
+
+    // Filter out duplicates of the current song
+    return suggestions.filter(s => !isDuplicateTrack(song, s));
   } catch (e) {
     console.error('Failed to fetch vibe suggestions:', e);
     return [];

@@ -228,11 +228,17 @@ export async function getYouTubeStreamUrl(videoId: string): Promise<string> {
   return `https://www.youtube.com/watch?v=${videoId}`;
 }
 
-export async function getYTSongSuggestions(song: Song): Promise<Song[]> {
+export async function getYTSongSuggestions(song: Song, targetLanguage?: string | null): Promise<Song[]> {
   try {
     const cleanArtist = song.primaryArtists.replace(/\s*-\s*topic/gi, '').trim();
     // Search for the artist + mix or similar tracks to get same vibe
-    const query = `${song.name} ${cleanArtist} radio`;
+    let query = `${song.name} ${cleanArtist} radio`;
+    if (targetLanguage) {
+      const lowerQuery = query.toLowerCase();
+      if (!lowerQuery.includes(targetLanguage.toLowerCase())) {
+        query = `${song.name} ${cleanArtist} ${targetLanguage} radio`;
+      }
+    }
     const results = await searchYouTubeSongs(query, song.name, cleanArtist);
     return results.filter(s => s.id !== song.id);
   } catch (e) {

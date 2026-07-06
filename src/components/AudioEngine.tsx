@@ -21,11 +21,17 @@ function updateMediaSessionCustom(song: Song | null, currentTime: number, durati
     title: song.name,
     artist: metadataArtist,
     album: song.album?.name || '',
-    artwork: song.image?.map((image) => ({
-      src: image.url,
-      sizes: image.quality?.includes('x') ? image.quality : '500x500',
-      type: 'image/jpeg',
-    })) || [],
+    artwork: song.image?.map((image) => {
+      let src = image.url || '';
+      if (src.startsWith('//')) {
+        src = `https:${src}`;
+      }
+      return {
+        src,
+        sizes: image.quality?.includes('x') ? image.quality : '500x500',
+        type: 'image/jpeg',
+      };
+    }) || [],
   });
 
   navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
@@ -590,9 +596,31 @@ export default function AudioEngine() {
 
     const syncActions = () => {
       navigator.mediaSession.setActionHandler('play', () => {
+        const isYt = usePlayerStore.getState().currentSong?.id.startsWith('yt_');
+        if (isYt) {
+          if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === 'function') {
+            try { ytPlayerRef.current.playVideo(); } catch {}
+          }
+        } else {
+          const audio = audioRef.current;
+          if (audio) {
+            audio.play().catch(() => {});
+          }
+        }
         usePlayerStore.setState({ isPlaying: true });
       });
       navigator.mediaSession.setActionHandler('pause', () => {
+        const isYt = usePlayerStore.getState().currentSong?.id.startsWith('yt_');
+        if (isYt) {
+          if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
+            try { ytPlayerRef.current.pauseVideo(); } catch {}
+          }
+        } else {
+          const audio = audioRef.current;
+          if (audio) {
+            audio.pause();
+          }
+        }
         usePlayerStore.setState({ isPlaying: false });
       });
       navigator.mediaSession.setActionHandler('previoustrack', () => {
