@@ -1,9 +1,12 @@
 package com.blackhole.streaming;
 
 import android.Manifest;
+import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import androidx.core.app.ActivityCompat;
@@ -11,6 +14,8 @@ import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    private PowerManager.WakeLock wakeLock;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -37,6 +42,29 @@ public class MainActivity extends BridgeActivity {
                 settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
             }
         }
+
+        // Acquire WakeLock to keep CPU active for background playback
+        try {
+            PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (powerManager != null) {
+                wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BlackHole::AudioPlayback");
+                wakeLock.acquire();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        // Start Foreground Service to keep background thread alive
+        try {
+            Intent serviceIntent = new Intent(this, BackgroundAudioService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent);
+            } else {
+                startService(serviceIntent);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
@@ -51,18 +79,42 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onPause() {
         super.onPause(); 
-        
-        // Force the WebView to stay active in the background to prevent audio pause
-        // We use a slight delay to ensure the system pause has finished
+        // Synchronously keep the WebView active to prevent audio freeze
         if (this.getBridge() != null && this.getBridge().getWebView() != null) {
-            final WebView webView = this.getBridge().getWebView();
-            webView.post(new Runnable() {
-                @Override
-                public void run() {
-                    webView.onResume();
-                    webView.resumeTimers();
-                }
-            });
+            this.getBridge().getWebView().onResume();
+            this.getBridge().getWebView().resumeTimers();
         }
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        // Also keep WebView active when fully stopped in background
+        if (this.getBridge() != null && this.getBridge().getWebView() != null) {
+            this.getBridge().getWebView().onResume();
+            this.getBridge().getWebView().resumeTimers();
+        }
+    }
+
+    @Override
+    public void onDestroy() {
+        // Release WakeLock when the app is completely destroyed
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        
+        // Stop foreground service
+        try {
+            Intent serviceIntent = new Intent(this, BackgroundAudioService.class);
+            stopService(serviceIntent);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        
+        super.onDestroy();
     }
 }
