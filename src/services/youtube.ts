@@ -168,15 +168,19 @@ export async function searchYouTubeSongs(
         const durationText = vr.lengthText?.simpleText || '';
         const duration = parseDuration(durationText);
 
-        // 1. Strict duration constraint: skip videos under 45s (teasers/shorts) or over 8 minutes (compilations/movies)
-        if (duration > 0 && (duration < 45 || duration > 480)) {
+        // 1. Strict duration constraint: skip videos under 100s (shorts, status clips, stories, ringtones) or over 8 minutes (full movies)
+        if (duration > 0 && (duration < 100 || duration > 480)) {
           continue;
         }
 
-        // 2. Strict keyword constraints: filter out non-songs (vlogs, reviews, climax scenes, reactions, etc.)
+        // 2. Strict keyword constraints: filter out non-songs (vlogs, status clips, Instagram stories, ringtones, movie scenes)
         const titleLower = title.toLowerCase();
         const uploaderLower = uploader.toLowerCase();
         const nonSongKeywords = [
+          'status', 'story', 'stories', 'shorts', 'short', 'reel', 'reels', 'tiktok',
+          'whatsapp', 'instagram', 'insta', 'facebook', 'snapchat', 'cut song', 'ringtone',
+          'clip', 'clips', 'black screen', 'green screen', 'fan edit', 'fmv', 'bgm status',
+          'lyrics status', 'lyric status', 'status video', 'video status',
           'full movie', 'interview', 'review', 'reaction', 'trailer', 'teaser', 
           'promo', 'vlog', 'climax scene', 'fight scene', 'comedy scene', 'scene', 
           'episode', 'serial', 'public review', 'theater response', 'theatre response', 
